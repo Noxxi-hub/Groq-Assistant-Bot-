@@ -4,9 +4,8 @@ import google.generativeai as genai
 import os
 from flask import Flask
 import threading
-import asyncio
 
-# 1. Webserver für Render (damit der Dienst online bleibt)
+# 1. Webserver für Render
 app = Flask(__name__)
 @app.route('/')
 def home(): 
@@ -16,9 +15,10 @@ def run_flask():
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
 
-# 2. KI Setup - Hier wurde das Modell auf 'gemini-1.5-flash' aktualisiert
+# 2. KI Setup - Präzise Modell-Bezeichnung
 genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
-model = genai.GenerativeModel('gemini-1.5-flash')
+# Wir nutzen hier den vollen Pfad 'models/gemini-1.5-flash'
+model = genai.GenerativeModel('models/gemini-1.5-flash')
 
 # 3. Discord Setup
 intents = discord.Intents.default()
@@ -29,12 +29,10 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 async def on_ready():
     print(f'--- ERFOLG ---')
     print(f'Eingeloggt als: {bot.user.name}')
-    print(f'ID: {bot.user.id}')
     print(f'--------------')
 
 @bot.event
 async def on_message(message):
-    # Ignoriere eigene Nachrichten
     if message.author == bot.user:
         return
 
@@ -52,40 +50,32 @@ async def on_message(message):
 
         async with message.channel.typing():
             try:
-                print(f"Anfrage an Gemini: {query}")
+                # Generierung mit dem neuen Modellnamen
                 response = model.generate_content(query)
                 if response and response.text:
                     await message.reply(response.text)
                 else:
-                    await message.reply("KI gab keine Antwort zurück.")
+                    await message.reply("Die KI hat keine Textantwort geliefert.")
             except Exception as e:
                 print(f"KI FEHLER: {e}")
                 await message.reply(f"Fehler in der KI-Verarbeitung: {e}")
         return
 
     # AUTOMATISCHE ÜBERSETZUNG (DE <-> FR)
-    if len(message.content) > 3:
+    if len(message.content) > 3 and not message.content.startswith("!"):
         try:
-            # Wir prüfen kurz, ob es eine normale Nachricht ist (kein Bot-Befehl)
-            if not message.content.startswith("!"):
-                async with message.channel.typing():
-                    prompt = f"Übersetze DE<->FR, sonst antworte NUR mit 'SKIP': {message.content}"
-                    response = model.generate_content(prompt)
-                    if response.text and "SKIP" not in response.text.upper():
-                        await message.reply(f"🌍 {response.text}")
-        except Exception as e:
-            print(f"ÜBERSETZUNGS FEHLER: {e}")
+            async with message.channel.typing():
+                prompt = f"Übersetze DE<->FR, sonst antworte NUR mit 'SKIP': {message.content}"
+                response = model.generate_content(prompt)
+                if response.text and "SKIP" not in response.text.upper():
+                    await message.reply(f"🌍 {response.text}")
+        except Exception:
+            pass # Ignorieren bei Fehlern in der Automatik
 
-# 4. Start-Sequenz
 if __name__ == "__main__":
-    # Flask in eigenem Thread starten
     threading.Thread(target=run_flask, daemon=True).start()
-    
     token = os.getenv("DISCORD_TOKEN")
-    if not token:
-        print("FEHLER: Kein DISCORD_TOKEN in den Umgebungsvariablen gefunden!")
+    if token:
+        bot.run(token)
     else:
-        try:
-            bot.run(token)
-        except Exception as e:
-            print(f"START FEHLER: {e}")
+        print("FEHLER: Kein DISCORD_TOKEN gefunden!")
