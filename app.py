@@ -45,24 +45,28 @@ def detect_language_simple(text: str) -> str:
     if not text or len(text.strip()) < 3:
         return "UNKNOWN"
 
-    t = text.lower().strip()
+    t = " " + text.lower().strip() + " "
 
-    # Französisch – relativ zuverlässig
+    # Französisch
     fr_indicators = [
-        "je", "tu", "il", "elle", "nous", "vous", "ils", "est", "suis", "c'est",
-        "ça", "qui", "quoi", "comment", "pourquoi", "merci", "salut", "oui", "non",
-        "le ", "la ", "les ", "un ", "une ", "des "
+        " je ", " tu ", " il ", " elle ", " nous ", " vous ", " ils ", " elles ",
+        " suis ", " es ", " est ", " êtes ", " sommes ", " sont ",
+        " c'est ", " ça ", " qu' ", " qui ", " quoi ", " comment ", " pourquoi ",
+        " quand ", " où ", " combien ", " merci ", " salut ", " bonjour ",
+        " pardon ", " désolé ", " voilà ", " oui ", " non ",
+        " le ", " la ", " les ", " un ", " une ", " des ", " du ", " au ", " aux "
     ]
-    if any(w in t for w in fr_indicators):
+    if any(ind in t for ind in fr_indicators):
         return "FR"
 
     # Deutsch
     de_indicators = [
-        "ich", "du", "er", "sie", "es", "wir", "ihr", "ist", "bin", "bist",
-        "der ", "die ", "das ", "ein ", "eine ", "und", "oder", "aber", "dass",
-        "was", "wie", "warum", "bitte", "danke"
+        " ich ", " du ", " er ", " sie ", " es ", " wir ", " ihr ", " ist ",
+        " bin ", " bist ", " sind ", " war ", " waren ", " haben ", " hast ", " hat ",
+        " der ", " die ", " das ", " ein ", " eine ", " und ", " oder ", " aber ",
+        " dass ", " was ", " wie ", " warum ", " bitte ", " danke ", " ja ", " nein "
     ]
-    if any(w in t for w in de_indicators):
+    if any(ind in t for ind in de_indicators):
         return "DE"
 
     return "UNKNOWN"
@@ -89,7 +93,7 @@ async def on_ready():
 
 
 # ────────────────────────────────────────────────
-# BEFEHLE (help, translate, ai) – bleiben weitgehend gleich
+# BEFEHLE
 # ────────────────────────────────────────────────
 
 @bot.command(name="help")
@@ -99,14 +103,17 @@ async def cmd_help(ctx):
         color=discord.Color.blue()
     )
     embed.set_author(name="VHA ALLIANCE", icon_url=LOGO_URL)
+    embed.set_thumbnail(url=LOGO_URL)
+
     embed.add_field(
         name="Befehle",
         value=(
             "`!translate on/off` → Automatische Übersetzung DE↔FR an/aus\n"
-            "`!ai [Text]` → KI-Frage (antwortet in der Sprache der Frage)"
+            "`!ai [Frage]` → KI antwortet in der Sprache deiner Frage"
         ),
         inline=False
     )
+
     embed.set_footer(text="VHA - Powering Communication", icon_url=LOGO_URL)
     await ctx.send(embed=embed)
 
@@ -114,20 +121,24 @@ async def cmd_help(ctx):
 @bot.command(name="translate")
 async def cmd_toggle_translate(ctx, status: str = None):
     global translate_active
+
     if status is None:
         translate_active = not translate_active
     else:
-        translate_active = status.lower() in ("on", "an", "ein", "true", "1", "aktiviert")
+        translate_active = status.lower() in ("on", "an", "ein", "true", "1", "aktiviert", "active")
 
     color = discord.Color.green() if translate_active else discord.Color.red()
-    de = "Aktiviert" if translate_active else "Deaktiviert"
-    fr = "Activée" if translate_active else "Désactivée"
+
+    de_status = "Aktiviert" if translate_active else "Deaktiviert"
+    fr_status = "Activée" if translate_active else "Désactivée"
 
     embed = discord.Embed(
-        title="VHA System • Übersetzung",
-        description=f"**Deutsch ↔ Französisch** {de} / {fr}",
+        title="VHA System",
+        description=f"**Übersetzung {de_status}**\n**Traduction {fr_status}**",
         color=color
     )
+    embed.set_author(name="VHA System", icon_url=LOGO_URL)
+
     await ctx.send(embed=embed)
 
 
@@ -135,55 +146,76 @@ async def cmd_toggle_translate(ctx, status: str = None):
 @commands.cooldown(1, 12, commands.BucketType.user)
 async def cmd_ai(ctx, *, question: str = None):
     if not question or not question.strip():
-        await ctx.send("Beispiel: `!ai Qui est la VHA ?`  oder  `!ai Was ist die VHA?`")
+        embed = discord.Embed(
+            description="❓ Beispiel:\n`!ai Was ist die VHA?`\n`!ai Qui est la VHA ?`",
+            color=discord.Color.orange()
+        )
+        embed.set_author(name="VHA ALLIANCE", icon_url=LOGO_URL)
+        await ctx.send(embed=embed)
         return
 
-    thinking = await ctx.send("**Denke nach …** 🧠")
+    thinking = await ctx.send(embed=discord.Embed(
+        description="**Denke nach …** 🧠",
+        color=discord.Color.blurple()
+    ))
 
-    lang = detect_language_simple(question)  # hier nur DE/FR/UNKNOWN
+    lang_code = detect_language_simple(question)
 
     lang_map = {
         "DE": ("Deutsch",    "auf Deutsch",     "Antwort auf Deutsch"),
         "FR": ("Französisch","auf Französisch", "Réponse en français"),
     }
-    _, prompt_lang, footer = lang_map.get(lang, ("Deutsch", "auf Deutsch", "Antwort auf Deutsch"))
 
-    system = f"""Du bist ein freundlicher VHA-Alliance Assistent.
-Antworte **ausschließlich** {prompt_lang}.
-Keine Sprachhinweise. Natürlich und direkt."""
+    display_name, prompt_lang, footer_text = lang_map.get(lang_code, ("Deutsch", "auf Deutsch", "Antwort auf Deutsch"))
+
+    system_content = f"""Du bist ein hilfreicher Assistent der VHA Alliance.
+
+**WICHTIG – SPRACHE:**
+- Antworte **ausschließlich** in der Sprache der gestellten Frage.
+- Französische Frage → komplett französisch
+- Deutsche Frage    → komplett deutsch
+- Keine Sprachkommentare, kein Code-Switching
+"""
 
     try:
-        client = Groq(api_key=os.getenv("GROQ_API_KEY"))
-        resp = client.chat.completions.create(
+        groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+
+        completion = groq_client.chat.completions.create(
             model=GROQ_MODEL,
-            temperature=0.7,
+            temperature=0.75,
             max_tokens=1400,
             messages=[
-                {"role": "system", "content": system},
+                {"role": "system", "content": system_content},
                 {"role": "user",   "content": question.strip()}
             ]
         )
-        answer = resp.choices[0].message.content.strip()
-        color = 0x5865F2
+
+        answer = completion.choices[0].message.content.strip()
+        color = discord.Color.from_rgb(88, 101, 242)
+
     except Exception as e:
-        answer = f"Fehler: {str(e)}"
-        color = 0xFF0000
-        footer = "Fehler"
+        answer = f"Fehler bei der KI-Anfrage:\n{type(e).__name__}: {str(e)}"
+        color = discord.Color.red()
+        footer_text = "Fehler"
 
     embed = discord.Embed(
         title="VHA KI • Antwort",
-        description=answer,
+        description=answer[:4000],
         color=color
     )
     embed.set_author(name="VHA ALLIANCE", icon_url=LOGO_URL)
-    embed.add_field(name="→ Deine Frage", value=question[:900], inline=False)
-    embed.set_footer(text=f"VHA • Groq • {GROQ_MODEL} • {footer}", icon_url=LOGO_URL)
+    embed.set_thumbnail(url=LOGO_URL)
+    embed.add_field(name="Deine Frage", value=f"→ {question[:1000]}", inline=False)
+    embed.set_footer(
+        text=f"VHA • Groq • {GROQ_MODEL} • {footer_text}",
+        icon_url=LOGO_URL
+    )
 
     await thinking.edit(embed=embed)
 
 
 # ────────────────────────────────────────────────
-# WICHTIG: AUTOMATISCHE ÜBERSETZUNG – NUR DE→FR oder FR→DE
+# AUTOMATISCHE ÜBERSETZUNG – NUR DE→FR oder FR→DE
 # ────────────────────────────────────────────────
 
 @bot.event
@@ -195,12 +227,12 @@ async def on_message(message: discord.Message):
 
     if message.id in processed_messages:
         return
+
     processed_messages.add(message.id)
     if len(processed_messages) > 300:
         processed_messages.clear()
 
-    # Befehle verarbeiten
-    if message.content.startswith("!"):
+    if message.content.startswith(bot.command_prefix):
         await bot.process_commands(message)
         return
 
@@ -212,53 +244,64 @@ async def on_message(message: discord.Message):
         return
 
     low = content.lower()
-    if low in {"ok", "lol", "xd", "haha", "ja", "nein", "oui", "non", "danke", "merci", "gg", "?", "!", "😂", "😅"}:
+    if low in {
+        "ok", "lol", "xd", "haha", "ja", "nein", "oui", "non", "danke", "merci",
+        "gg", "?", "!", "😂", "😅", "😭", "👍", "👌", "bruh", "wtf", "np", "kk"
+    }:
         return
 
     lang = detect_language_simple(content)
 
     if lang == "DE":
-        # Deutsch → nur ins Französische übersetzen
-        system_prompt = (
-            "Du bist ein sehr natürlicher Übersetzer. "
-            "Übersetze den folgenden deutschen Satz **idiomatisch und locker** ins Französische. "
-            "Gib **nur** die französische Übersetzung aus – kein Einleitungssatz, kein Hinweis, nichts weiter."
-        )
         flag = "🇫🇷"
-    elif lang == "FR":
-        # Französisch → nur ins Deutsche übersetzen
         system_prompt = (
-            "Du bist ein sehr natürlicher Übersetzer. "
-            "Übersetze den folgenden französischen Satz **idiomatisch und locker** ins Deutsche. "
-            "Gib **nur** die deutsche Übersetzung aus – kein Einleitungssatz, kein Hinweis, nichts weiter."
+            "Du bist ein sehr natürlicher, umgangssprachlicher Übersetzer. "
+            "Übersetze den folgenden deutschen Text **locker, jugendlich und idiomatisch** ins Französische. "
+            "Gib **ausschließlich** die französische Übersetzung aus – "
+            "KEINEN einleitenden Satz, KEIN 'Voici la traduction:', KEIN 'En français:', "
+            "KEIN Originaltext, KEIN Kommentar, KEINE Erklärung, nur den reinen französischen Text."
         )
+    elif lang == "FR":
         flag = "🇩🇪"
+        system_prompt = (
+            "Du bist ein sehr natürlicher, umgangssprachlicher Übersetzer. "
+            "Übersetze den folgenden französischen Text **locker, jugendlich und idiomatisch** ins Deutsche. "
+            "Gib **ausschließlich** die deutsche Übersetzung aus – "
+            "KEINEN einleitenden Satz, KEIN 'Voici la traduction:', KEIN 'Auf Deutsch:', "
+            "KEIN Originaltext, KEIN Kommentar, KEINE Erklärung, nur den reinen deutschen Text."
+        )
     else:
-        # andere Sprachen → gar nichts machen
         return
 
     try:
-        client = Groq(api_key=os.getenv("GROQ_API_KEY"))
-        resp = client.chat.completions.create(
+        groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+        completion = groq_client.chat.completions.create(
             model=GROQ_MODEL,
-            temperature=0.1,           # sehr deterministisch
-            max_tokens=600,
+            temperature=0.15,           # sehr stabil & natürlich
+            max_tokens=700,
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user",   "content": content}
+                {"role": "user", "content": content}
             ]
         )
-        translation = resp.choices[0].message.content.strip()
 
-        # Vermeide doppelte / gleiche Übersetzung
-        if translation.lower() == content.lower():
+        translation = completion.choices[0].message.content.strip()
+
+        if not translation or len(translation) < 6:
+            return
+
+        # Sanfter Kopie-Filter (nicht 1:1)
+        orig_clean = re.sub(r'[^a-zA-Z0-9äöüÄÖÜßéèêàâùûîôç ]', '', content.lower())
+        trans_clean = re.sub(r'[^a-zA-Z0-9äöüÄÖÜßéèêàâùûîôç ]', '', translation.lower())
+
+        if orig_clean == trans_clean or len(trans_clean) < len(orig_clean) * 0.45:
+            # Vermutlich nur Kopie oder zu kurz → überspringen
             return
 
         await message.reply(f"{flag} {translation}", mention_author=False)
 
     except Exception as e:
-        print(f"Übersetzungsfehler: {e}")
-        # stiller Fehler → kein Crash
+        print(f"Übersetzungsfehler: {type(e).__name__} - {str(e)}")
 
 
 # ────────────────────────────────────────────────
@@ -266,9 +309,11 @@ async def on_message(message: discord.Message):
 # ────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    threading.Thread(target=run_flask, daemon=True).start()
+    threading.Thread(target=run_flask, daemon=True, name="Flask-KeepAlive").start()
+
     token = os.getenv("DISCORD_TOKEN")
     if not token:
         print("DISCORD_TOKEN fehlt!")
         exit(1)
+
     bot.run(token)
