@@ -10,7 +10,7 @@ from groq import Groq
 app = Flask(__name__)
 @app.route('/')
 def home(): 
-    return "VHA Universal Assistant Online"
+    return "VHA Universal Translator Online"
 
 def run_flask():
     port = int(os.environ.get("PORT", 10000))
@@ -26,48 +26,56 @@ intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 auto_translate = True
+last_processed_msg = None
 
 @bot.event
 async def on_ready():
-    activity = discord.Game(name="VHA Universal Translator", type=3)
+    activity = discord.Game(name="VHA Guard | !info", type=3)
     await bot.change_presence(status=discord.Status.online, activity=activity)
-    print(f'--- {bot.user.name} (VHA) ONLINE ---')
+    print(f'--- {bot.user.name} ONLINE ---')
     sys.stdout.flush()
 
 @bot.event
 async def on_message(message):
-    global auto_translate
+    global auto_translate, last_processed_msg
+    
+    # 1. Grund-Sperren (Ignoriere Bots & Doppelnachrichten)
     if message.author == bot.user:
         return
+    
+    current_msg_fingerprint = f"{message.author.id}_{message.content}"
+    if last_processed_msg == current_msg_fingerprint:
+        return
+    last_processed_msg = current_msg_fingerprint
 
-    # BEFEHLE (DREISPRACHIG)
+    # 2. BEFEHLE (DREISPRACHIG)
     if message.content.lower() in ["!info", "!help"]:
         help_text = (
             "**🌍 VHA Universal Assistant**\n\n"
             "🇩🇪 **DE:** Automatische Übersetzung für alle Sprachen.\n"
             "🇫🇷 **FR:** Traduction automatique pour toutes les langues.\n"
             "🇺🇸 **EN:** Automatic translation for all languages.\n\n"
-            "`!ai [Text]` - AI Chat | `!auto on/off` - Toggle | `!status`"
+            "**Commands:** `!ai [Text]` | `!auto on/off` | `!status`"
         )
         await message.reply(help_text)
         return
 
     if message.content.lower() == "!status":
-        s = "AKTIV ✅ / ACTIF ✅ / ACTIVE ✅" if auto_translate else "OFF 😴"
+        s = "AKTIV ✅ / ACTIF ✅" if auto_translate else "OFF 😴"
         await message.reply(f"🛰️ **System Status:** {s}")
         return
 
     if message.content.lower() == "!auto on":
         auto_translate = True
-        await message.reply("✅ **Translator ON** (DE/FR/Global)")
+        await message.reply("✅ **Universal Translator ON**")
         return
         
     if message.content.lower() == "!auto off":
         auto_translate = False
-        await message.reply("😴 **Translator OFF**")
+        await message.reply("😴 **Universal Translator OFF**")
         return
 
-    # KI ANFRAGE
+    # KI CHAT (!ai)
     if message.content.lower().startswith("!ai "):
         query = message.content[4:].strip()
         async with message.channel.typing():
@@ -83,24 +91,35 @@ async def on_message(message):
                 await message.reply("❌ Error.")
         return
 
-    # 4. UNIVERSAL-ÜBERSETZUNG MIT REPLY-LOGIK
-    if auto_translate and len(message.content) > 2 and not message.content.startswith("!"):
+    # 3. UNIVERSAL-ÜBERSETZUNG (MIT FILTER GEGEN SPAM/HAHA)
+    if auto_translate and len(message.content) > 3 and not message.content.startswith("!"):
+        
+        # FILTER: Ignoriere Lacher und kurze Reaktionen (Blacklist)
+        low_msg = message.content.lower().strip()
+        blacklist = ["haha", "lol", "xd", "hi", "hey", "ok", "danke", "merci", "thanks", "gut", "bien", "nice"]
+        if any(word == low_msg for word in blacklist):
+            return
+
         try:
-            # Check ob es eine Antwort auf eine andere Nachricht ist
-            context_text = ""
+            context_info = ""
             if message.reference and message.reference.message_id:
-                ref_msg = await message.channel.fetch_message(message.reference.message_id)
-                context_text = f" (Context of replied message: {ref_msg.content})"
+                try:
+                    ref_msg = await message.channel.fetch_message(message.reference.message_id)
+                    context_info = f"\n(Note: This is a reply to: '{ref_msg.content}')"
+                except:
+                    pass
 
             t_prompt = (
-                f"You are a universal translator for the VHA Discord server. "
-                f"Input Text: '{message.content}'{context_text}. "
-                f"Rules: "
-                f"1. If Input is German -> Translate to French (start with 🇫🇷). "
-                f"2. If Input is French -> Translate to German (start with 🇩🇪). "
-                f"3. If Input is ANY OTHER language (English, Spanish, etc.) -> Translate to BOTH German (🇩🇪) and French (🇫🇷). "
-                f"4. If it's a reply, use the context to ensure the translation makes sense. "
-                f"5. Answer ONLY with the translation(s). If it's just emojis or noise, answer 'SKIP'."
+                f"Task: Smart Translation for VHA.\n"
+                f"Input: '{message.content}'{context_info}\n\n"
+                f"Strict Rules:\n"
+                f"1. ONLY translate if the content has actual meaning.\n"
+                f"2. DO NOT translate laughs, greetings, or single-word reactions.\n"
+                f"3. If Input is German -> Translate to French (start with 🇫🇷).\n"
+                f"4. If Input is French -> Translate to German (start with 🇩🇪).\n"
+                f"5. If Other -> Translate to BOTH German (🇩🇪) and French (🇫🇷).\n"
+                f"6. If it's a reply, use context but translate the 'Input' only.\n"
+                f"7. Answer ONLY with translation and flags. If unnecessary, answer 'SKIP'."
             )
             
             completion = client.chat.completions.create(
@@ -109,10 +128,10 @@ async def on_message(message):
                 temperature=0.1
             )
             result = completion.choices[0].message.content
-            if result and "SKIP" not in result.upper():
+            if result and "SKIP" not in result.upper() and len(result) > 2:
                 await message.reply(result)
         except Exception as e:
-            print(f"Translation Error: {e}")
+            print(f"Error: {e}")
 
 if __name__ == "__main__":
     threading.Thread(target=run_flask, daemon=True).start()
