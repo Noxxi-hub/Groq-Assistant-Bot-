@@ -126,32 +126,31 @@ async def on_ready():
 
 @bot.command(name="help")
 async def cmd_help(ctx):
-    embed = discord.Embed(title="VHA Translator – Hilfe", color=discord.Color.blue())
+    embed = discord.Embed(
+        title="VHA Translator – Hilfe", 
+        color=discord.Color.blue()
+    )
     embed.set_author(name="VHA ALLIANCE", icon_url=LOGO_URL)
+    
+    # Sektion Deutsch
     embed.add_field(
-        name="Befehle",
-        value="`!translate on/off` → Automatische Übersetzung DE↔FR\n`!ai [Text]` → KI in deiner Sprache",
+        name="🇩🇪 Deutsch",
+        value="`!translate on/off`: Automatik an/aus\n`!ai [Frage]`: KI direkt fragen",
         inline=False
     )
-    embed.set_footer(text="VHA - Powering Communication", icon_url=LOGO_URL)
-    await ctx.send(embed=embed)
-
-
-@bot.command(name="translate")
-async def cmd_toggle_translate(ctx, status: str = None):
-    global translate_active
-    if status is None:
-        translate_active = not translate_active
-    else:
-        translate_active = status.lower() in ("on", "an", "ein", "true", "1", "aktiviert", "active")
-
-    color = discord.Color.green() if translate_active else discord.Color.red()
-    embed = discord.Embed(
-        title="VHA System • Übersetzung",
-        description=f"**Deutsch ↔ Französisch** {'Aktiviert' if translate_active else 'Deaktiviert'}",
-        color=color
+    
+    # Sektion Französisch
+    embed.add_field(
+        name="🇫🇷 Français",
+        value="`!translate on/off`: Activer/Désactiver\n`!ai [Question]`: Poser une question",
+        inline=False
     )
+    
+    embed.set_thumbnail(url=LOGO_URL) # Das kleine Bild rechts oben
+    embed.set_footer(text="VHA - Powering Communication", icon_url=LOGO_URL)
+    
     await ctx.send(embed=embed)
+
 
 
 @bot.command(name="ai")
