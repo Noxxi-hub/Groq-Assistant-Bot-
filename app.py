@@ -18,21 +18,8 @@ LOGO_URL = (
 
 GROQ_MODEL = "llama-3.3-70b-versatile"
 
-FR_INDICATORS = {
-    "c'est", "ce", "est", "suis", "es", "sommes", "êtes", "sont",
-    "je", "tu", "il", "elle", "on", "nous", "vous", "ils", "elles",
-    "oui", "non", "pas", "ne", "le", "la", "les", "un", "une", "des",
-    "et", "ou", "mais", "que", "qui", "pour", "dans", "sur", "avec", "à"
-}
-
-DE_INDICATORS = {
-    "ist", "bin", "bist", "sind", "seid", "ich", "du", "er", "sie", "es",
-    "wir", "ihr", "Sie", "ja", "nein", "nicht", "kein", "der", "die", "das",
-    "ein", "eine", "und", "oder", "aber", "dass", "für", "mit", "auf", "in", "zu"
-}
-
 # ────────────────────────────────────────────────
-# GLOBALS & FLASK KEEP-ALIVE
+# GLOBALS & FLASK
 # ────────────────────────────────────────────────
 
 app = Flask(__name__)
@@ -51,24 +38,96 @@ def home():
 
 
 # ────────────────────────────────────────────────
-# SPRACHERKENNUNG (nur DE/FR zuverlässig)
+# ERWEITERTE SPRACHERKENNUNG (für !ai und ggf. andere Teile)
 # ────────────────────────────────────────────────
 
 def detect_language_simple(text: str) -> str | None:
-    if not text.strip():
+    if not text or len(text.strip()) < 4:
         return None
+
     t = text.lower()
-    fr_score = sum(1 for w in FR_INDICATORS if re.search(rf'\b{w}\b', t))
-    de_score = sum(1 for w in DE_INDICATORS if re.search(rf'\b{w}\b', t))
-    if fr_score > de_score + 1:
-        return "FR"
-    if de_score > fr_score + 1:
+
+    # Deutsch
+    if any(re.search(rf'\b{w}\b', t) for w in ["ist", "ich", "du", "wir", "und", "der", "die", "das", "nicht", "für", "mit", "auf"]):
         return "DE"
+
+    # Französisch
+    if any(re.search(rf'\b{w}\b', t) for w in ["je", "tu", "nous", "vous", "est", "suis", "c'est", "oui", "pas", "le", "la", "les"]):
+        return "FR"
+
+    # Englisch
+    if any(re.search(rf'\b{w}\b', t) for w in ["the", "is", "you", "i", "and", "to", "in", "of", "it", "that", "this", "what", "how"]):
+        return "EN"
+
+    # Spanisch
+    if any(re.search(rf'\b{w}\b', t) for w in ["el", "la", "los", "las", "es", "estoy", "yo", "tu", "nosotros", "si", "no", "qué"]):
+        return "ES"
+
+    # Italienisch
+    if any(re.search(rf'\b{w}\b', t) for w in ["il", "la", "i", "gli", "le", "è", "sono", "io", "tu", "noi", "sì", "no"]):
+        return "IT"
+
+    # Portugiesisch
+    if any(re.search(rf'\b{w}\b', t) for w in ["o", "a", "os", "as", "é", "estou", "eu", "você", "nós", "sim", "não"]):
+        return "PT"
+
+    # Niederländisch
+    if any(re.search(rf'\b{w}\b', t) for w in ["de", "het", "een", "ik", "je", "wij", "is", "en", "van", "in", "op"]):
+        return "NL"
+
+    # Polnisch
+    if any(re.search(rf'\b{w}\b', t) for w in ["jest", "ja", "ty", "my", "i", "w", "na", "do", "nie", "tak", "co"]):
+        return "PL"
+
+    # Russisch
+    if any(re.search(rf'\b{w}\b', t) for w in ["я", "ты", "мы", "и", "в", "на", "не", "что", "это", "как", "где"]):
+        return "RU"
+
+    # Japanisch
+    if any(w in t for w in ["です", "ます", "は", "を", "が", "に", "の", "で", "か", "ね", "よ"]):
+        return "JA"
+
+    # Koreanisch
+    if any(w in t for w in ["이다", "하다", "이", "가", "을", "를", "에", "에서", "요", "네", "아니요"]):
+        return "KO"
+
+    # Chinesisch (vereinfacht)
+    if any(w in t for w in ["的", "是", "在", "我", "你", "他", "她", "我们", "和", "不", "什么"]):
+        return "ZH"
+
+    # Arabisch
+    if any(w in t for w in ["في", "من", "على", "إلى", "أنا", "أنت", "هو", "هي", "نحن", "لا", "ما"]):
+        return "AR"
+
+    # Hindi
+    if any(w in t for w in ["है", "मैं", "तुम", "हम", "और", "में", "से", "के", "को", "नहीं", "क्या"]):
+        return "HI"
+
+    # Türkisch
+    if any(re.search(rf'\b{w}\b', t) for w in ["ve", "ile", "de", "da", "ben", "sen", "o", "biz", "evet", "hayır", "ne"]):
+        return "TR"
+
+    # Schwedisch
+    if any(re.search(rf'\b{w}\b', t) for w in ["jag", "du", "vi", "är", "och", "i", "på", "det", "en", "ett"]):
+        return "SV"
+
+    # Dänisch / Norwegisch (sehr ähnlich)
+    if any(re.search(rf'\b{w}\b', t) for w in ["jeg", "du", "vi", "er", "og", "i", "på", "det", "en", "et"]):
+        return "DA/NO"
+
+    # Finnisch
+    if any(re.search(rf'\b{w}\b', t) for w in ["minä", "sinä", "me", "on", "ja", "ei", "että", "mutta", "jos", "kun"]):
+        return "FI"
+
+    # Tschechisch
+    if any(re.search(rf'\b{w}\b', t) for w in ["je", "já", "ty", "my", "a", "v", "na", "do", "ne", "ano"]):
+        return "CS"
+
     return None
 
 
 # ────────────────────────────────────────────────
-# DISCORD BOT SETUP
+# BOT SETUP
 # ────────────────────────────────────────────────
 
 intents = discord.Intents.default()
@@ -162,6 +221,42 @@ async def cmd_ai(ctx, *, question: str = None):
         color=discord.Color.blurple()
     ))
 
+    # ─── Sprache erkennen ───────────────────────────────
+    lang_code = detect_language_simple(question)
+
+    lang_map = {
+        "DE":    ("Deutsch",       "auf Deutsch"),
+        "FR":    ("Französisch",   "auf Französisch"),
+        "EN":    ("Englisch",      "in English"),
+        "ES":    ("Spanisch",      "en español"),
+        "IT":    ("Italienisch",   "in italiano"),
+        "PT":    ("Portugiesisch", "em português"),
+        "NL":    ("Niederländisch","in het Nederlands"),
+        "PL":    ("Polnisch",      "po polsku"),
+        "RU":    ("Russisch",      "на русском языке"),
+        "JA":    ("Japanisch",     "日本語で"),
+        "KO":    ("Koreanisch",    "한국어로"),
+        "ZH":    ("Chinesisch",    "用中文"),
+        "AR":    ("Arabisch",      "بالعربية"),
+        "HI":    ("Hindi",         "हिन्दी में"),
+        "TR":    ("Türkisch",      "Türkçe"),
+        "SV":    ("Schwedisch",    "på svenska"),
+        "DA/NO": ("Skandinavisch", "på skandinavisk"),
+        "FI":    ("Finnisch",      "suomeksi"),
+        "CS":    ("Tschechisch",   "česky"),
+    }
+
+    if lang_code in lang_map:
+        display_name, prompt_lang = lang_map[lang_code]
+    else:
+        display_name = "Deutsch (Fallback)"
+        prompt_lang = "auf Deutsch"
+
+    system_content = (
+        f"Du bist ein hilfreicher, präziser und freundlicher Assistent der VHA Alliance. "
+        f"Antworte klar, natürlich und **{prompt_lang}**."
+    )
+
     try:
         groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
@@ -170,19 +265,13 @@ async def cmd_ai(ctx, *, question: str = None):
             temperature=0.75,
             max_tokens=1400,
             messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "Du bist ein hilfreicher, präziser und freundlicher Assistent der VHA Alliance. "
-                        "Antworte klar, natürlich und **immer auf Deutsch**, außer der User fragt explizit in einer anderen Sprache."
-                    )
-                },
-                {"role": "user", "content": question}
+                {"role": "system", "content": system_content},
+                {"role": "user",   "content": question}
             ]
         )
 
         answer = completion.choices[0].message.content.strip()
-        color = discord.Color.from_rgb(88, 101, 242)  # Discord-Blau
+        color = discord.Color.from_rgb(88, 101, 242)
 
     except Exception as e:
         answer = f"Fehler bei der KI-Anfrage:\n{type(e).__name__}: {str(e)}"
@@ -196,7 +285,10 @@ async def cmd_ai(ctx, *, question: str = None):
     embed.set_author(name="VHA ALLIANCE", icon_url=LOGO_URL)
     embed.set_thumbnail(url=LOGO_URL)
     embed.add_field(name="Deine Frage", value=f"→ {question[:1000]}", inline=False)
-    embed.set_footer(text="VHA • Groq • llama-3.3-70b-versatile", icon_url=LOGO_URL)
+    embed.set_footer(
+        text=f"VHA • Groq • {GROQ_MODEL} • Antwort auf {display_name}",
+        icon_url=LOGO_URL
+    )
 
     await thinking.edit(embed=embed)
 
@@ -231,9 +323,6 @@ async def on_message(message: discord.Message):
     if lower in {"ok", "lol", "xd", "haha", "oui", "ja", "nein", "danke", "merci", "?", "!", "😂", "😅", "gg"}:
         return
 
-    # ────────────────────────────────
-    # Welche Sprachen ausgeben?
-    # ────────────────────────────────
     targets = ["DE", "FR"]
     ref_lang = None
     ref_text = ""
@@ -252,9 +341,6 @@ async def on_message(message: discord.Message):
     if ref_lang == "OTHER":
         targets.append("ORIGINAL")
 
-    # ────────────────────────────────
-    # Übersetzungen erzeugen
-    # ────────────────────────────────
     lines = []
 
     for tgt in targets:
@@ -265,10 +351,7 @@ async def on_message(message: discord.Message):
             prompt = "Übersetze NUR ins Französische. Nur die Übersetzung. Kein Kommentar."
             flag = "🇫🇷"
         else:
-            prompt = (
-                "Übersetze NUR in die Sprache des Originaltexts. "
-                "Gib NUR die Übersetzung aus. Kein Kommentar, kein Sprachhinweis."
-            )
+            prompt = "Übersetze NUR in die Sprache des Originaltexts. Gib NUR die Übersetzung aus. Kein Kommentar."
             flag = "🌐"
 
         try:
