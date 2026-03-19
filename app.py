@@ -24,7 +24,7 @@ GROQ_MODEL = "llama-3.3-70b-versatile"
 
 app = Flask(__name__)
 processed_messages = set()
-translate_active = True
+translate_active = True   # ← immer aktiv beim Start
 
 
 def run_flask():
@@ -38,31 +38,29 @@ def home():
 
 
 # ────────────────────────────────────────────────
-# SPRACHE ERKENNEN – verbessert für kurze Nachrichten
+# SPRACHE ERKENNEN – extra stark für kurze Chat-Nachrichten
 # ────────────────────────────────────────────────
 
 def detect_language_simple(text: str) -> str:
-    t = text.lower().strip()
-    if len(t) < 2:
+    if not text:
         return "UNKNOWN"
 
-    # Sehr kurze Texte zuerst prüfen
-    short_fr = {"oui", "non", "ok", "lol", "xd", "mdr", "je", "tu", "il", "elle", "ça", "si", "merci", "salut", "voilà"}
-    short_de = {"ja", "nein", "ok", "lol", "xd", "haha", "danke", "bitte", "klar", "genau", "jo", "ey", "np", "kk"}
+    t = text.lower().strip()
 
-    if t in short_fr or any(w in t for w in short_fr):
+    # Sehr kurze & typische Chat-Wörter (aus deinen Screenshots)
+    short_fr = {"oui", "non", "ok", "lol", "xd", "mdr", "je", "tu", "il", "elle", "ça", "si", "merci", "salut", "voilà", "c'est", "t'es", "peux", "être", "laisse", "gérer"}
+    short_de = {"ja", "nein", "ok", "lol", "xd", "haha", "danke", "bitte", "klar", "genau", "jo", "ey", "np", "kk", "bin", "grad", "mach", "teste", "bossin"}
+
+    if any(word in t for word in short_fr) or t in short_fr:
         return "FR"
-    if t in short_de or any(w in t for w in short_de):
+    if any(word in t for word in short_de) or t in short_de:
         return "DE"
 
-    # Normaler Check mit Wortgrenzen
-    t_with_spaces = " " + t + " "
-    fr_indicators = [" je ", " tu ", " est ", " c'est ", " ça ", " qui ", " quoi ", " comment ", " pourquoi ", " pardon ", " désolé "]
-    if any(ind in t_with_spaces for ind in fr_indicators):
+    # Normale Erkennung für längere Sätze
+    t_space = " " + t + " "
+    if any(ind in t_space for ind in [" je ", " tu ", " est ", " c'est ", " ça ", " qui ", " quoi ", " comment ", " pourquoi ", " pardon ", " désolé ", " t'es "]):
         return "FR"
-
-    de_indicators = [" ich ", " du ", " ist ", " bin ", " der ", " die ", " das ", " ein ", " eine ", " und ", " oder "]
-    if any(ind in t_with_spaces for ind in de_indicators):
+    if any(ind in t_space for ind in [" ich ", " du ", " ist ", " bin ", " der ", " die ", " das ", " ein ", " eine ", " und ", " oder ", " wie geht"]):
         return "DE"
 
     return "UNKNOWN"
@@ -98,7 +96,7 @@ async def cmd_help(ctx):
     embed.set_author(name="VHA ALLIANCE", icon_url=LOGO_URL)
     embed.add_field(
         name="Befehle",
-        value="`!translate on/off` → Übersetzung DE↔FR an/aus\n`!ai [Text]` → KI in deiner Sprache",
+        value="`!translate on/off` → Automatische Übersetzung DE↔FR\n`!ai [Text]` → KI in deiner Sprache",
         inline=False
     )
     embed.set_footer(text="VHA - Powering Communication", icon_url=LOGO_URL)
@@ -114,12 +112,9 @@ async def cmd_toggle_translate(ctx, status: str = None):
         translate_active = status.lower() in ("on", "an", "ein", "true", "1", "aktiviert", "active")
 
     color = discord.Color.green() if translate_active else discord.Color.red()
-    de = "Aktiviert" if translate_active else "Deaktiviert"
-    fr = "Activée" if translate_active else "Désactivée"
-
     embed = discord.Embed(
         title="VHA System • Übersetzung",
-        description=f"**Deutsch ↔ Französisch** {de} / {fr}",
+        description=f"**Deutsch ↔ Französisch** {'Aktiviert' if translate_active else 'Deaktiviert'}",
         color=color
     )
     await ctx.send(embed=embed)
@@ -135,7 +130,6 @@ async def cmd_ai(ctx, *, question: str = None):
     thinking = await ctx.send("**Denke nach …** 🧠")
 
     lang = detect_language_simple(question)
-
     lang_map = {
         "DE": ("Deutsch",    "auf Deutsch",     "Antwort auf Deutsch"),
         "FR": ("Französisch","auf Französisch", "Réponse en français"),
@@ -152,10 +146,7 @@ Keine Sprachhinweise. Natürlich und direkt."""
             model=GROQ_MODEL,
             temperature=0.7,
             max_tokens=1400,
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user",   "content": question.strip()}
-            ]
+            messages=[{"role": "system", "content": system}, {"role": "user", "content": question.strip()}]
         )
         answer = resp.choices[0].message.content.strip()
         color = 0x5865F2
@@ -168,12 +159,11 @@ Keine Sprachhinweise. Natürlich und direkt."""
     embed.set_author(name="VHA ALLIANCE", icon_url=LOGO_URL)
     embed.add_field(name="→ Deine Frage", value=question[:900], inline=False)
     embed.set_footer(text=f"VHA • Groq • {GROQ_MODEL} • {footer}", icon_url=LOGO_URL)
-
     await thinking.edit(embed=embed)
 
 
 # ────────────────────────────────────────────────
-# AUTOMATISCHE ÜBERSETZUNG – NUR EINE RICHTUNG + sehr tolerant bei kurzen Texten
+# AUTOMATISCHE ÜBERSETZUNG – jetzt maximal tolerant
 # ────────────────────────────────────────────────
 
 @bot.event
@@ -197,12 +187,12 @@ async def on_message(message: discord.Message):
         return
 
     content = message.content.strip()
-    if len(content) < 2:           # fast nichts mehr ignorieren
+    if len(content) < 2:          # fast nichts mehr blocken
         return
 
     low = content.lower()
 
-    # Sehr reduzierte Ignore-Liste – nur wirklich extrem kurze Spam
+    # Sehr minimale Ignore-Liste (nur extremster Spam)
     if low in {"?", "!", "xd", "lol", "ok"} and len(low) <= 3:
         return
 
@@ -213,18 +203,16 @@ async def on_message(message: discord.Message):
         system_prompt = (
             "Du bist ein sehr natürlicher, umgangssprachlicher Übersetzer. "
             "Übersetze den folgenden deutschen Text **locker, jugendlich und idiomatisch** ins Französische. "
-            "Gib **ausschließlich** die französische Übersetzung aus – "
-            "KEINEN einleitenden Satz, KEIN 'Voici la traduction:', KEIN 'En français:', "
-            "KEIN Originaltext, KEIN Kommentar, KEINE Erklärung – nur den reinen französischen Text."
+            "Gib **ausschließlich** die französische Übersetzung aus – KEINEN einleitenden Satz, KEIN 'Voici la traduction:', "
+            "nur den reinen französischen Text."
         )
     elif lang == "FR":
         flag = "🇩🇪"
         system_prompt = (
             "Du bist ein sehr natürlicher, umgangssprachlicher Übersetzer. "
             "Übersetze den folgenden französischen Text **locker, jugendlich und idiomatisch** ins Deutsche. "
-            "Gib **ausschließlich** die deutsche Übersetzung aus – "
-            "KEINEN einleitenden Satz, KEIN 'Voici la traduction:', KEIN 'Auf Deutsch:', "
-            "KEIN Originaltext, KEIN Kommentar, KEINE Erklärung – nur den reinen deutschen Text."
+            "Gib **ausschließlich** die deutsche Übersetzung aus – KEINEN einleitenden Satz, KEIN 'Auf Deutsch:', "
+            "nur den reinen deutschen Text."
         )
     else:
         return
@@ -250,8 +238,8 @@ async def on_message(message: discord.Message):
         orig_clean = re.sub(r'[^a-zA-Z0-9äöüÄÖÜßéèêàâùûîôç ]', '', content.lower())
         trans_clean = re.sub(r'[^a-zA-Z0-9äöüÄÖÜßéèêàâùûîôç ]', '', translation.lower())
 
-        if len(trans_clean) < 4 or abs(len(trans_clean) - len(orig_clean)) < 4:
-            return  # nur bei fast identischer Länge und extrem kurz skippen
+        if len(trans_clean) < 4 or abs(len(trans_clean) - len(orig_clean)) < 5:
+            return
 
         await message.reply(f"{flag} {translation}", mention_author=False)
 
