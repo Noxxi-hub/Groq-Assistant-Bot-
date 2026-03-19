@@ -8,7 +8,7 @@ from groq import Groq
 
 app = Flask(__name__)
 @app.route('/')
-def home(): return "VHA Stable Online"
+def home(): return "VHA Translator Stable"
 
 def run_flask():
     app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
@@ -21,75 +21,75 @@ intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 auto_translate = True
-# Wir speichern die ID der letzten Nachricht, um Doppel-Antworten physikalisch zu blockieren
-last_msg_id = 0
+last_processed_id = 0
 
 @bot.event
 async def on_ready():
-    await bot.change_presence(activity=discord.Game(name="VHA | Only Translating"))
-    print(f'--- {bot.user.name} READY ---')
+    await bot.change_presence(activity=discord.Game(name="VHA | Übersetzer aktiv"))
+    print(f'--- {bot.user.name} BEREIT ---')
 
 @bot.event
 async def on_message(message):
-    global auto_translate, last_msg_id
+    global auto_translate, last_processed_id
     
-    if message.author == bot.user or message.id == last_msg_id:
+    # 1. Sofort-Sperren
+    if message.author == bot.user or message.id == last_processed_id:
         return
     
-    # Sofortiger Abbruch bei ganz kurzen Nachrichten (haha, lol, ja, etc.)
+    # Ignoriere ganz kurze Sachen (Haha, Lol, Hi)
     if len(message.content) < 4 and not message.content.startswith("!"):
         return
 
-    # BEFEHLE
+    # 2. BEFEHLE
     if message.content.lower().startswith("!auto"):
-        if "on" in message.content.lower():
-            auto_translate = True
-            await message.reply("✅ Auto-Translate ON")
-        else:
-            auto_translate = False
-            await message.reply("😴 Auto-Translate OFF")
+        auto_translate = "on" in message.content.lower()
+        status = "AN ✅" if auto_translate else "AUS 😴"
+        await message.reply(f"🛰️ Automatische Übersetzung ist jetzt {status}")
         return
 
-    # !ai BEFEHL (Hier darf er reden)
+    # 3. KI-CHAT (!ai) - Hier darf er ausführlich sein
     if message.content.lower().startswith("!ai "):
         query = message.content[4:].strip()
         async with message.channel.typing():
             try:
-                chat_completion = client.chat.completions.create(
-                    messages=[{"role": "system", "content": "You are a helpful assistant. Answer briefly in the user's language."},
+                res = client.chat.completions.create(
+                    messages=[{"role": "system", "content": "Antworte kurz und präzise in der Sprache des Nutzers."},
                               {"role": "user", "content": query}],
                     model=MODEL_NAME, temperature=0.5
                 )
-                last_msg_id = message.id
-                await message.reply(chat_completion.choices[0].message.content)
+                last_processed_id = message.id
+                await message.reply(res.choices[0].message.content)
             except: pass
         return
 
-    # AUTOMATISCHE ÜBERSETZUNG (STRENG & RUHIG)
+    # 4. REINE ÜBERSETZUNG (STRENGER MODUS)
     if auto_translate and not message.content.startswith("!"):
-        # Kurze Liste für Wörter, die gar nicht erst zur KI gehen
-        blacklist = ["haha", "lol", "merci", "danke", "thanks", "okay", "super", "top"]
-        if message.content.lower().strip() in blacklist:
+        # Blacklist für unnötige Übersetzungen
+        if message.content.lower().strip() in ["haha", "lol", "ok", "danke", "merci"]:
             return
 
         try:
+            # Der Prompt ist jetzt extrem minimalistisch
             t_prompt = (
-                f"Translate the following text. Rules:\n"
-                f"1. German <-> French.\n"
-                f"2. Other languages -> DE + FR.\n"
-                f"3. Output ONLY the translation and flags. No comments, no chatter.\n"
-                f"4. If it's a joke or simple greeting, answer 'SKIP'.\n"
+                "Du bist ein 1:1 Übersetzer für einen Discord-Server. \n"
+                "Regeln:\n"
+                "1. Deutsch zu Französisch (🇫🇷).\n"
+                "2. Französisch zu Deutsch (🇩🇪).\n"
+                "3. Andere Sprachen zu DE (🇩🇪) UND FR (🇫🇷).\n"
+                "4. ANTWORTE NUR MIT DER ÜBERSETZUNG. Kein 'Die Person sagt', keine Kommentare.\n"
+                "5. Wenn der Text keinen Sinn macht oder nur aus Emojis besteht, antworte nur: SKIP\n"
                 f"Text: {message.content}"
             )
             
             completion = client.chat.completions.create(
                 messages=[{"role": "user", "content": t_prompt}],
-                model=MODEL_NAME, temperature=0.0 # 0.0 macht ihn extrem sachlich
+                model=MODEL_NAME, 
+                temperature=0.0  # Absolut keine Kreativität mehr!
             )
             result = completion.choices[0].message.content
             
             if result and "SKIP" not in result.upper():
-                last_msg_id = message.id
+                last_processed_id = message.id
                 await message.reply(result)
         except: pass
 
