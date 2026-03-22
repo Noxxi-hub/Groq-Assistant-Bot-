@@ -175,21 +175,17 @@ class EventTimerView(discord.ui.View):
             return
         self.responded = True
 
-        # Timer in timer.json speichern
-        import json as jsonlib
+        # Timer in MongoDB speichern
+        from pymongo import MongoClient
         import os
 
-        timer_file = "timer.json"
         try:
-            if os.path.exists(timer_file):
-                with open(timer_file, "r") as f:
-                    data = jsonlib.load(f)
-            else:
-                data = {"timers": []}
+            client = MongoClient(os.getenv("MONGODB_URI"))
+            col = client["vhabot"]["timers"]
 
             end_timestamp = datetime.now(timezone.utc).timestamp() + self.seconds
 
-            data["timers"].append({
+            col.insert_one({
                 "event": self.event_name,
                 "duration_seconds": self.seconds,
                 "end_timestamp": end_timestamp,
@@ -197,9 +193,6 @@ class EventTimerView(discord.ui.View):
                 "author": self.author.display_name,
                 "warned": False
             })
-
-            with open(timer_file, "w") as f:
-                jsonlib.dump(data, f, indent=2, ensure_ascii=False)
 
             # Buttons deaktivieren
             for item in self.children:

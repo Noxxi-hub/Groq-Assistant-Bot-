@@ -1,20 +1,21 @@
 # ════════════════════════════════════════════════
 #  Timer-Cog  •  VHA Alliance
-#  Separate Datei – wird von app.py geladen
-#  Erlaubte Rollen: Administrator, R5, R4
+#  MongoDB für persistente Timer-Speicherung
+#  Timer bleiben auch nach Bot-Neustart erhalten!
 # ════════════════════════════════════════════════
 
 import discord
 from discord.ext import commands, tasks
-import json
 import os
 import asyncio
+import logging
 from datetime import datetime, timezone
+from pymongo import MongoClient
 
-DATA_FILE = "timer.json"
+log = logging.getLogger("VHABot.Timer")
+
 ALLOWED_ROLES = {"R5", "R4"}
 
-# Kanäle wo Timer-Erinnerungen gepostet werden
 ANNOUNCEMENT_CHANNELS = [
     1466363028902645914,
     1466355380346028065,
@@ -29,86 +30,75 @@ ANNOUNCEMENT_CHANNELS = [
     1479390903901618197,
 ]
 
-def get_warning_seconds(total_seconds: int) -> int:
-    """Gibt zurück wie viele Sekunden vor Ablauf gewarnt werden soll."""
-    if total_seconds > 24 * 3600:      # über 24h → 1h vorher
-        return 3600
-    elif total_seconds > 3600:         # über 1h → 15min vorher
-        return 900
-    elif total_seconds > 600:          # über 10min → 5min vorher
-        return 300
-    else:                              # unter 10min → keine Vorwarnung
-        return 0
+LOGO_URL = (
+    "https://cdn.discordapp.com/attachments/1484252260614537247/"
+    "1484253018533662740/Picsart_26-03-18_13-55-24-994.png"
+    "?ex=69bd8dd7&is=69bc3c57&hm=de6fea399dd30f97d2a14e1515c9e7f91d81d0d9ea111f13e0757d42eb12a0e5&"
+)
+
+# ────────────────────────────────────────────────
+# MongoDB Verbindung
+# ────────────────────────────────────────────────
+
+def get_db():
+    client = MongoClient(os.getenv("MONGODB_URI"))
+    return client["vhabot"]["timers"]
 
 
 # ────────────────────────────────────────────────
 # Hilfsfunktionen
 # ────────────────────────────────────────────────
 
-def load_timers() -> list:
-    if not os.path.exists(DATA_FILE):
-        return []
-    with open(DATA_FILE, "r", encoding="utf-8") as f:
-        return json.load(f).get("timers", [])
-
-
-def save_timers(timers: list):
-    with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump({"timers": timers}, f, indent=2, ensure_ascii=False)
-
-
 def has_permission(member: discord.Member) -> bool:
-    # Administrator-Berechtigung ODER Rolle R5/R4
     if member.guild_permissions.administrator:
         return True
-    # Rollenname exakt oder case-insensitive prüfen
     member_roles = {r.name.upper() for r in member.roles}
     allowed_upper = {r.upper() for r in ALLOWED_ROLES}
     return bool(member_roles & allowed_upper)
 
 
 def parse_duration(duration_str: str) -> int:
-    """
-    Parst eine Zeitangabe wie '2h', '30m', '1h30m', '90m' in Sekunden.
-    Gibt -1 zurück wenn das Format ungültig ist.
-    """
+    import re
     duration_str = duration_str.lower().strip()
     total_seconds = 0
-    import re
-
-    # Format: 1h30m, 2h, 45m, 90m, 3600s
-    pattern = re.findall(r'(\d+)\s*([hms])', duration_str)
+    pattern = re.findall(r'(\d+)\s*([dhms])', duration_str)
     if not pattern:
-        # Nur Zahl → als Minuten interpretieren
         if duration_str.isdigit():
             return int(duration_str) * 60
         return -1
-
     for value, unit in pattern:
         value = int(value)
-        if unit == 'h':
+        if unit == 'd':
+            total_seconds += value * 86400
+        elif unit == 'h':
             total_seconds += value * 3600
         elif unit == 'm':
             total_seconds += value * 60
         elif unit == 's':
             total_seconds += value
-
     return total_seconds if total_seconds > 0 else -1
 
 
 def format_duration(seconds: int) -> str:
-    """Formatiert Sekunden als lesbare Zeit z.B. '1h 30m'."""
-    h = seconds // 3600
+    d = seconds // 86400
+    h = (seconds % 86400) // 3600
     m = (seconds % 3600) // 60
-    s = seconds % 60
     parts = []
-    if h:
-        parts.append(f"{h}h")
-    if m:
-        parts.append(f"{m}m")
-    if s and not h:
-        parts.append(f"{s}s")
-    return " ".join(parts) if parts else "0m"
+    if d: parts.append(f"{d}T")
+    if h: parts.append(f"{h}h")
+    if m: parts.append(f"{m}m")
+    return " ".join(parts) if parts else "< 1m"
+
+
+def get_warning_seconds(total_seconds: int) -> int:
+    if total_seconds > 24 * 3600:
+        return 3600
+    elif total_seconds > 3600:
+        return 900
+    elif total_seconds > 600:
+        return 300
+    else:
+        return 0
 
 
 # ────────────────────────────────────────────────
@@ -123,118 +113,90 @@ class TimerCog(commands.Cog):
     def cog_unload(self):
         self.check_timers.cancel()
 
-    # ── Hintergrund-Task: prüft jede Minute ob Timer abgelaufen ──
     @tasks.loop(seconds=30)
     async def check_timers(self):
-        timers = load_timers()
-        now = datetime.now(timezone.utc).timestamp()
-        remaining = []
-        fired = []
-        warned = []
+        try:
+            col = get_db()
+            now = datetime.now(timezone.utc).timestamp()
 
-        for t in timers:
-            if now >= t["end_timestamp"]:
-                fired.append(t)
-            else:
-                # Vorwarnung prüfen
-                warning_seconds = get_warning_seconds(t["duration_seconds"])
-                if warning_seconds > 0:
-                    warn_at = t["end_timestamp"] - warning_seconds
-                    if not t.get("warned", False) and now >= warn_at:
-                        warned.append(t)
-                        t["warned"] = True
-                remaining.append(t)
+            timers = list(col.find())
+            fired = [t for t in timers if now >= t["end_timestamp"]]
+            to_warn = [t for t in timers if not t.get("warned", False) and
+                       now >= t["end_timestamp"] - get_warning_seconds(t["duration_seconds"]) and
+                       get_warning_seconds(t["duration_seconds"]) > 0 and
+                       now < t["end_timestamp"]]
 
-        if warned or fired:
-            save_timers(remaining)
+            # Vorwarnungen senden
+            for t in to_warn:
+                try:
+                    time_left = format_duration(int(t["end_timestamp"] - now))
+                    embed = discord.Embed(
+                        title=f"⚠️ Vorwarnung / Avertissement / Aviso • {t['event']}",
+                        color=0xF39C12
+                    )
+                    embed.add_field(name="🇩🇪 Startet in", value=f"**{time_left}**! Macht euch bereit! ⚔️", inline=False)
+                    embed.add_field(name="🇫🇷 Commence dans", value=f"**{time_left}** ! Préparez-vous ! ⚔️", inline=False)
+                    embed.add_field(name="🇧🇷 Começa em", value=f"**{time_left}**! Preparem-se! ⚔️", inline=False)
+                    embed.set_footer(text=f"Gesetzt von / Défini par / Definido por {t['author']}")
 
-        # Vorwarnungen senden
-        for t in warned:
-            try:
-                warning_seconds = get_warning_seconds(t["duration_seconds"])
-                time_left = format_duration(int(t["end_timestamp"] - now))
-                embed = discord.Embed(
-                    title=f"⚠️ Vorwarnung / Avertissement • {t['event']}",
-                    color=0xF39C12
-                )
-                embed.add_field(
-                    name="🇩🇪 Deutsch",
-                    value=f"**{t['event']}** startet in **{time_left}**! Macht euch bereit! ⚔️",
-                    inline=False
-                )
-                embed.add_field(
-                    name="🇫🇷 Français",
-                    value=f"**{t['event']}** commence dans **{time_left}** ! Préparez-vous ! ⚔️",
-                    inline=False
-                )
-                embed.set_footer(text=f"Timer gesetzt von / Minuteur défini par {t['author']}")
-                for channel_id in ANNOUNCEMENT_CHANNELS:
-                    channel = self.bot.get_channel(channel_id)
-                    if channel:
-                        try:
-                            await channel.send("@everyone", embed=embed)
-                        except Exception:
-                            pass
-            except Exception as e:
-                print(f"Vorwarnungs-Fehler: {e}")
+                    for channel_id in ANNOUNCEMENT_CHANNELS:
+                        channel = self.bot.get_channel(channel_id)
+                        if channel:
+                            try:
+                                await channel.send("@everyone", embed=embed)
+                            except Exception:
+                                pass
 
-        # Finale Erinnerungen senden
-        for t in fired:
-            try:
-                embed = discord.Embed(
-                    title=f"⏰ Erinnerung / Rappel • {t['event']}",
-                    color=0xE74C3C
-                )
-                embed.add_field(
-                    name="🇩🇪 Deutsch",
-                    value=f"**{t['event']}** beginnt jetzt! ⚔️",
-                    inline=False
-                )
-                embed.add_field(
-                    name="🇫🇷 Français",
-                    value=f"**{t['event']}** commence maintenant ! ⚔️",
-                    inline=False
-                )
-                embed.set_footer(text=f"Timer gesetzt von / Minuteur défini par {t['author']}")
-                for channel_id in ANNOUNCEMENT_CHANNELS:
-                    channel = self.bot.get_channel(channel_id)
-                    if channel:
-                        try:
-                            await channel.send("@everyone", embed=embed)
-                        except Exception:
-                            pass
-            except Exception as e:
-                print(f"Timer-Fehler beim Senden: {e}")
+                    col.update_one({"_id": t["_id"]}, {"$set": {"warned": True}})
+                except Exception as e:
+                    log.error(f"Vorwarnungs-Fehler: {e}")
+
+            # Finale Erinnerungen senden und Timer löschen
+            for t in fired:
+                try:
+                    embed = discord.Embed(
+                        title=f"⏰ Erinnerung / Rappel / Lembrete • {t['event']}",
+                        color=0xE74C3C
+                    )
+                    embed.add_field(name="🇩🇪 Deutsch", value=f"**{t['event']}** beginnt jetzt! ⚔️", inline=False)
+                    embed.add_field(name="🇫🇷 Français", value=f"**{t['event']}** commence maintenant ! ⚔️", inline=False)
+                    embed.add_field(name="🇧🇷 Português", value=f"**{t['event']}** começa agora! ⚔️", inline=False)
+                    embed.set_footer(text=f"Gesetzt von / Défini par / Definido por {t['author']}")
+
+                    for channel_id in ANNOUNCEMENT_CHANNELS:
+                        channel = self.bot.get_channel(channel_id)
+                        if channel:
+                            try:
+                                await channel.send("@everyone", embed=embed)
+                            except Exception:
+                                pass
+
+                    col.delete_one({"_id": t["_id"]})
+                except Exception as e:
+                    log.error(f"Timer-Fehler: {e}")
+
+        except Exception as e:
+            log.error(f"check_timers Fehler: {e}")
 
     @check_timers.before_loop
     async def before_check(self):
         await self.bot.wait_until_ready()
 
     # ── !timer ───────────────────────────────────
-    @commands.group(name="timer", aliases=["rappel", "erinnerung", "reminder"], invoke_without_command=True)
+    @commands.group(name="timer", aliases=["rappel", "erinnerung", "reminder", "lembrete"], invoke_without_command=True)
     async def timer(self, ctx, duration: str = None, *, event: str = None):
-        """
-        Setzt einen Timer für ein Event.
-        Nutzung: !timer DAUER EVENTNAME
-        Beispiel: !timer 2h Kriegsstart
-                  !timer 30m Allianz-Meeting
-                  !timer 1h30m Angriff Zone 5
-        """
         if duration is None or event is None:
             await ctx.send(
                 "❓ Nutzung: `!timer DAUER EVENT`\n"
                 "Exemple: `!timer 2h Kriegsstart` / `!timer 30m Meeting`\n"
-                "Zeitformate / Formats: `30m`, `2h`, `1h30m`"
+                "Zeitformate / Formats: `30m`, `2h`, `1h30m`, `3d`"
             )
             return
 
         if not has_permission(ctx.author):
             embed = discord.Embed(
-                title="❌ Keine Berechtigung / Pas d'autorisation",
-                description=(
-                    "Nur **Administrator**, **R5** und **R4** dürfen Timer setzen.\n"
-                    "Seuls les **Administrateur**, **R5** et **R4** peuvent définir des minuteurs."
-                ),
+                title="❌ Keine Berechtigung / Pas d'autorisation / Sem permissão",
+                description="Nur **Administrator**, **R5** und **R4** dürfen Timer setzen.",
                 color=0xED4245
             )
             await ctx.send(embed=embed)
@@ -242,160 +204,127 @@ class TimerCog(commands.Cog):
 
         seconds = parse_duration(duration)
         if seconds <= 0:
-            await ctx.send(
-                "❌ Ungültiges Zeitformat. Beispiele: `30m`, `2h`, `1h30m`\n"
-                "Format invalide. Exemples: `30m`, `2h`, `1h30m`"
-            )
+            await ctx.send("❌ Ungültiges Format. Beispiele: `30m`, `2h`, `1h30m`, `3d`")
             return
 
         end_timestamp = datetime.now(timezone.utc).timestamp() + seconds
 
-        timers = load_timers()
-        timers.append({
-            "event": event,
-            "duration_seconds": seconds,
-            "end_timestamp": end_timestamp,
-            "channel_id": ctx.channel.id,
-            "author": ctx.author.display_name
-        })
-        save_timers(timers)
-
-        embed = discord.Embed(
-            title=f"⏱️ Timer gesetzt / Minuteur défini • {event}",
-            color=0x57F287
-        )
-        embed.add_field(
-            name="🇩🇪 Erinnerung in",
-            value=f"**{format_duration(seconds)}**",
-            inline=True
-        )
-        embed.add_field(
-            name="🇫🇷 Rappel dans",
-            value=f"**{format_duration(seconds)}**",
-            inline=True
-        )
-        embed.add_field(
-            name="📍 Event",
-            value=event,
-            inline=False
-        )
-        embed.set_footer(text=f"Gesetzt von / Défini par {ctx.author.display_name}")
-        await ctx.send(embed=embed)
-
-    # ── !timer list ──────────────────────────────
-    @timer.command(name="list", aliases=["liste", "all", "alle"])
-    async def timer_list(self, ctx):
-        """Zeigt alle aktiven Timer an."""
-        timers = load_timers()
-        now = datetime.now(timezone.utc).timestamp()
-
-        # Abgelaufene rausfiltern
-        active = [t for t in timers if now < t["end_timestamp"]]
-        if len(active) != len(timers):
-            save_timers(active)
-            timers = active
-
-        if not timers:
-            await ctx.send(
-                "📭 Keine aktiven Timer.\n"
-                "Aucun minuteur actif."
-            )
+        try:
+            col = get_db()
+            col.insert_one({
+                "event": event,
+                "duration_seconds": seconds,
+                "end_timestamp": end_timestamp,
+                "channel_id": ctx.channel.id,
+                "author": ctx.author.display_name,
+                "warned": False
+            })
+        except Exception as e:
+            log.error(f"MongoDB Speicher-Fehler: {e}")
+            await ctx.send("❌ Fehler beim Speichern des Timers.")
             return
 
         embed = discord.Embed(
-            title="⏱️ Aktive Timer / Minuteurs actifs",
-            color=0x3498DB
+            title=f"⏱️ Timer gesetzt / Minuteur défini / Lembrete definido • {event}",
+            color=0x57F287
         )
+        embed.add_field(name="🇩🇪 Erinnerung in", value=f"**{format_duration(seconds)}**", inline=True)
+        embed.add_field(name="🇫🇷 Rappel dans", value=f"**{format_duration(seconds)}**", inline=True)
+        embed.add_field(name="🇧🇷 Lembrete em", value=f"**{format_duration(seconds)}**", inline=True)
+        embed.add_field(name="📍 Event", value=event, inline=False)
+        embed.set_footer(text=f"Gesetzt von / Défini par / Definido por {ctx.author.display_name}")
+        await ctx.send(embed=embed)
 
+    # ── !timer list ──────────────────────────────
+    @timer.command(name="list", aliases=["liste", "all", "alle", "lista"])
+    async def timer_list(self, ctx):
+        try:
+            col = get_db()
+            now = datetime.now(timezone.utc).timestamp()
+            timers = list(col.find({"end_timestamp": {"$gt": now}}))
+        except Exception as e:
+            await ctx.send("❌ Fehler beim Laden der Timer.")
+            return
+
+        if not timers:
+            await ctx.send("📭 Keine aktiven Timer. / Aucun minuteur actif. / Nenhum lembrete ativo.")
+            return
+
+        embed = discord.Embed(title="⏱️ Aktive Timer / Minuteurs actifs / Lembretes ativos", color=0x3498DB)
         for t in timers:
             remaining = int(t["end_timestamp"] - now)
             embed.add_field(
                 name=f"📍 {t['event']}",
-                value=(
-                    f"⏳ Noch / Reste: **{format_duration(remaining)}**\n"
-                    f"👤 {t['author']}"
-                ),
+                value=f"⏳ Noch / Reste / Falta: **{format_duration(remaining)}**\n👤 {t['author']}",
                 inline=False
             )
-
-        embed.set_footer(text=f"Gesamt / Total: {len(timers)} Timer")
+        embed.set_footer(text=f"Gesamt / Total: {len(timers)}")
         await ctx.send(embed=embed)
 
     # ── !timer delete ────────────────────────────
-    @timer.command(name="delete", aliases=["löschen", "supprimer", "del", "remove", "cancel", "abbrechen", "annuler"])
+    @timer.command(name="delete", aliases=["löschen", "supprimer", "del", "remove", "cancel", "abbrechen", "annuler", "apagar"])
     async def timer_delete(self, ctx, *, event: str):
-        """Löscht einen Timer manuell."""
         if not has_permission(ctx.author):
             embed = discord.Embed(
-                title="❌ Keine Berechtigung / Pas d'autorisation",
-                description=(
-                    "Nur **Administrator**, **R5** und **R4** dürfen Timer löschen.\n"
-                    "Seuls les **Administrateur**, **R5** et **R4** peuvent supprimer des minuteurs."
-                ),
+                title="❌ Keine Berechtigung / Pas d'autorisation / Sem permissão",
                 color=0xED4245
             )
             await ctx.send(embed=embed)
             return
 
-        timers = load_timers()
-        original_len = len(timers)
-        timers = [t for t in timers if t["event"].lower() != event.lower()]
-
-        if len(timers) == original_len:
-            await ctx.send(
-                f"⚠️ Kein Timer mit dem Namen `{event}` gefunden.\n"
-                f"Aucun minuteur nommé `{event}` trouvé."
-            )
+        try:
+            col = get_db()
+            result = col.delete_one({"event": {"$regex": f"^{event}$", "$options": "i"}})
+        except Exception as e:
+            await ctx.send("❌ Fehler beim Löschen.")
             return
 
-        save_timers(timers)
+        if result.deleted_count == 0:
+            await ctx.send(f"⚠️ Kein Timer `{event}` gefunden. / Aucun minuteur `{event}` trouvé.")
+            return
+
         embed = discord.Embed(
-            title=f"🗑️ Timer gelöscht / Minuteur supprimé • {event}",
+            title=f"🗑️ Timer gelöscht / Minuteur supprimé / Lembrete apagado • {event}",
             color=0xED4245
         )
-        embed.set_footer(text=f"Gelöscht von / Supprimé par {ctx.author.display_name}")
+        embed.set_footer(text=f"Gelöscht von / Supprimé par / Apagado por {ctx.author.display_name}")
         await ctx.send(embed=embed)
 
     # ── !timer help ──────────────────────────────
-    @timer.command(name="help", aliases=["hilfe", "aide"])
+    @timer.command(name="help", aliases=["hilfe", "aide", "ajuda"])
     async def timer_help(self, ctx):
-        embed = discord.Embed(
-            title="⏱️ Timer – Hilfe / Aide",
-            color=0x3498DB
-        )
+        embed = discord.Embed(title="⏱️ Timer – Hilfe / Aide / Ajuda", color=0x3498DB)
         embed.add_field(
             name="🇩🇪 Befehle",
             value=(
                 "`!timer DAUER EVENT` – Timer setzen\n"
-                "`!timer list` – Alle aktiven Timer anzeigen\n"
-                "`!timer delete EVENTNAME` – Timer löschen\n\n"
-                "**Zeitformate:** `30m` `2h` `1h30m`\n"
-                "**Beispiel:** `!timer 2h Kriegsstart`"
+                "`!timer list` – Aktive Timer\n"
+                "`!timer delete NAME` – Löschen\n"
+                "**Formate:** `30m` `2h` `1h30m` `3d`"
             ),
             inline=False
         )
         embed.add_field(
             name="🇫🇷 Commandes",
             value=(
-                "`!rappel DURÉE EVENT` – Définir un minuteur\n"
-                "`!rappel list` – Voir tous les minuteurs\n"
-                "`!rappel supprimer EVENTNAME` – Supprimer\n\n"
-                "**Formats:** `30m` `2h` `1h30m`\n"
-                "**Exemple:** `!rappel 2h Kriegsstart`"
+                "`!rappel DURÉE EVENT` – Définir\n"
+                "`!rappel list` – Minuteurs actifs\n"
+                "`!rappel supprimer NAME` – Supprimer"
             ),
             inline=False
         )
         embed.add_field(
-            name="🔐 Berechtigung / Permission",
-            value="Administrator, R5, R4",
+            name="🇧🇷 Comandos",
+            value=(
+                "`!lembrete DURAÇÃO EVENT` – Definir\n"
+                "`!lembrete list` – Lembretes ativos\n"
+                "`!lembrete apagar NAME` – Apagar"
+            ),
             inline=False
         )
+        embed.add_field(name="🔐 Berechtigung", value="Administrator, R5, R4", inline=False)
         await ctx.send(embed=embed)
 
-
-# ────────────────────────────────────────────────
-# Setup
-# ────────────────────────────────────────────────
 
 async def setup(bot):
     await bot.add_cog(TimerCog(bot))
