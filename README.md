@@ -7,12 +7,18 @@ Automatische Übersetzung, Koordinaten-Verwaltung, Spieler-IDs, Timer, Event-Erk
 
 ## 🌐 Übersetzung
 
-Der Bot übersetzt automatisch alle Nachrichten zwischen **Deutsch 🇩🇪**, **Französisch 🇫🇷** und **Brasilianisches Portugiesisch 🇧🇷** — ohne Befehle, einfach normal schreiben.
+Der Bot übersetzt automatisch alle Nachrichten — welche Sprachen aktiv sind lässt sich per Button steuern.
 
-- 🇩🇪 Deutsch → 🇫🇷 + 🇧🇷 in einem Embed
-- 🇫🇷 Französisch → 🇩🇪 + 🇧🇷 in einem Embed
-- 🇧🇷 Portugiesisch → 🇩🇪 + 🇫🇷 in einem Embed
-- 🌍 Andere Sprachen (EN, JA, ES ...) → 🇩🇪 + 🇫🇷 + 🇧🇷 in einem Embed
+**Immer aktiv (nicht ausschaltbar):**
+- 🇩🇪 Deutsch ↔ 🇫🇷 Français
+
+**Ein/Ausschaltbar per `!sprachen`:**
+- 🇧🇷 Português (Standard: aktiv)
+- 🇬🇧 English (Standard: inaktiv)
+- 🇯🇵 日本語 (Standard: inaktiv)
+
+**Gastsprachen** (EN, JA, ES, ...):
+- Werden automatisch auf alle aktiven Sprachen übersetzt
 - Beim **Reply auf einen Gast** → übersetzt auch in die Gastsprache
 
 ---
@@ -24,8 +30,9 @@ Der Bot übersetzt automatisch alle Nachrichten zwischen **Deutsch 🇩🇪**, *
 |--------|-------------|
 | `!translate on/off` | Automatische Übersetzung ein/ausschalten |
 | `!translate status` | Status anzeigen |
+| `!sprachen` / `!languages` / `!idiomas` | Sprachen per Button ein/ausschalten 🔐 |
 | `!ai [Text]` | KI-Assistent in jeder Sprache |
-| `!übersetze` / `!traduire` / `!traduzir` | Text aus Bild übersetzen (Reply auf Bild) |
+| `!übersetze` / `!traduire` / `!traduzir` | Text aus Bild(ern) übersetzen |
 
 ### 🎮 Events 🔐
 | Befehl | Beschreibung |
@@ -56,15 +63,17 @@ Der Bot übersetzt automatisch alle Nachrichten zwischen **Deutsch 🇩🇪**, *
 
 **Zeitformate:** `30m` • `2h` • `1h30m` • `3d`  
 **Vorwarnung:** automatisch je nach Timer-Länge (5min / 15min / 1h vorher)  
-**Erinnerung:** in allen konfigurierten Kanälen mit @everyone auf DE + FR + PT
+**Erinnerung:** in 2 konfigurierten Kanälen mit @everyone auf allen aktiven Sprachen
 
-### 📊 Status
+### 📊 Status & Log
 | Befehl | Beschreibung |
 |--------|-------------|
 | `!ping` | Bot-Status, Latenz und Token-Verbrauch heute |
+| `!log` | Aktivitäts-Log anzeigen (nur dev) 🔐 |
+| `!log clear` | Log löschen (nur dev) 🔐 |
 | `!help` | Alle Befehle anzeigen |
 
-🔐 = Nur für **Administrator**, **R5** und **R4**
+🔐 = Nur für **Administrator**, **R5**, **R4** oder **dev**
 
 ---
 
@@ -74,9 +83,11 @@ Der Bot übersetzt automatisch alle Nachrichten zwischen **Deutsch 🇩🇪**, *
 ├── app.py                # Hauptbot
 ├── koordinaten.py        # Koordinaten-Cog (MongoDB)
 ├── timer.py              # Timer-Cog (MongoDB)
-├── bilduebersetzer.py    # Bild-Übersetzer-Cog
+├── bilduebersetzer.py    # Bild-Übersetzer-Cog (mehrere Bilder)
 ├── event.py              # Event-Erkennung-Cog (MongoDB)
 ├── spieler.py            # Spieler-IDs-Cog (MongoDB)
+├── sprachen.py           # Sprachen-Einstellungen-Cog (MongoDB)
+├── log.py                # Aktivitäts-Log-Cog (MongoDB)
 ├── koordinaten.json      # Backup der Koordinaten
 ├── requirements.txt      # Python-Abhängigkeiten
 └── README.md             # Diese Datei
@@ -84,15 +95,17 @@ Der Bot übersetzt automatisch alle Nachrichten zwischen **Deutsch 🇩🇪**, *
 
 ---
 
-## 🗄️ Datenbank
+## 🗄️ Datenbank (MongoDB Atlas)
 
-Alle dynamischen Daten werden in **MongoDB Atlas** gespeichert und bleiben bei Bot-Neustart erhalten:
+Alle dynamischen Daten werden in MongoDB gespeichert und bleiben bei Bot-Neustart erhalten:
 
 | Collection | Inhalt |
 |------------|--------|
-| `vhabot.timers` | Aktive Timer mit Event-Namen (DE/FR/PT) |
+| `vhabot.timers` | Aktive Timer mit Event-Namen (alle Sprachen) |
 | `vhabot.spieler` | Spieler-IDs |
 | `vhabot.koordinaten` | Allianz-Koordinaten |
+| `vhabot.sprachen` | Aktive Spracheinstellungen |
+| `vhabot.logs` | Aktivitäts-Log (max. 500 Einträge) |
 
 ---
 
@@ -111,6 +124,7 @@ Alle dynamischen Daten werden in **MongoDB Atlas** gespeichert und bleiben bei B
   - Sprachcache für Token-Ersparnis
   - Parallele Übersetzungen mit `asyncio.gather`
   - Token-Logging via `!ping`
+  - Mehrere Bilder gleichzeitig verarbeiten
 
 ---
 
@@ -135,6 +149,7 @@ python app.py
 
 ## 🗒️ Changelog
 
+- **v4.0** – Sprachen per Button steuerbar (PT/EN/JA), Log-System, Timer nur 2 Kanäle
 - **v3.0** – MongoDB für alle Daten, Event-Erkennung mit Buttons, PT als dritte Hauptsprache
 - **v2.0** – Async Optimierungen, Token-Logging, Bild-Übersetzer, Spieler-IDs
 - **v1.0** – Grundfunktionen: Übersetzung DE↔FR, Koordinaten, Timer
