@@ -214,10 +214,17 @@ async def translate_text(text: str, target_lang_name: str) -> str:
 # Importiere get_active_langs lazy (nach Bot-Start)
 def get_active_languages() -> set:
     try:
-        from sprachen import get_active_langs
-        return get_active_langs()
+        from sprachen import get_active_langs, get_col as sprachen_col
+        # Direkt aus MongoDB lesen statt Import
+        col = sprachen_col()
+        doc = col.find_one({"_id": "settings"})
+        if doc:
+            active = set(doc.get("active", ["DE", "FR"]))
+            active.update({"DE", "FR"})  # DE + FR immer
+            return active
+        return {"DE", "FR"}  # Fallback: nur DE + FR, kein PT automatisch
     except Exception:
-        return {"DE", "FR", "PT"}
+        return {"DE", "FR"}  # Fallback: nur DE + FR
 
 LANG_FLAGS = {
     "DE": "🇩🇪", "FR": "🇫🇷", "PT": "🇧🇷", "EN": "🇬🇧",
