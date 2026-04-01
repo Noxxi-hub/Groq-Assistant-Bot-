@@ -111,7 +111,15 @@ class SprachenView(discord.ui.View):
                 )
                 return
 
-            active = get_active_langs()
+            # Direkt aus MongoDB lesen
+            try:
+                col = get_col()
+                doc = col.find_one({"_id": "settings"})
+                active = set(doc.get("active", ["DE", "FR"])) if doc else {"DE", "FR"}
+                active.update({"DE", "FR"})  # immer drin
+            except Exception:
+                active = {"DE", "FR"}
+
             if code in active:
                 active.discard(code)
                 action = "deaktiviert / désactivé / desativado"
@@ -119,16 +127,22 @@ class SprachenView(discord.ui.View):
                 active.add(code)
                 action = "aktiviert / activé / ativado"
 
-            set_active_langs(active)
+            # Direkt in MongoDB schreiben
+            try:
+                col = get_col()
+                col.update_one(
+                    {"_id": "settings"},
+                    {"$set": {"active": list(active)}},
+                    upsert=True
+                )
+            except Exception as e:
+                await interaction.response.send_message(f"❌ Fehler: {e}", ephemeral=True)
+                return
 
             info = OPTIONAL_LANGS[code]
-            # Buttons aktualisieren
             self._update_buttons()
-
             embed = self._make_embed()
             await interaction.response.edit_message(embed=embed, view=self)
-
-            # Kurze Bestätigung
             await interaction.followup.send(
                 f"{info['flag']} **{info['name']}** {action}!",
                 ephemeral=True
