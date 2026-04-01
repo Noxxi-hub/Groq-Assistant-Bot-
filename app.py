@@ -69,6 +69,11 @@ def run_flask():
 def home():
     return "VHA Translator • Online"
 
+@app.route("/ping")
+def ping():
+    """Wird von UptimeRobot und Render aufgerufen"""
+    return "pong", 200
+
 
 # ────────────────────────────────────────────────
 # GROQ ASYNC WRAPPER mit Retry
@@ -620,11 +625,21 @@ async def on_message(message: discord.Message):
 # ────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    threading.Thread(target=run_flask, daemon=True, name="Flask-KeepAlive").start()
+    # Flask-KeepAlive Server im Hintergrund starten (für Render Free-Tier wichtig)
+    flask_thread = threading.Thread(
+        target=run_flask,
+        daemon=True,
+        name="Flask-KeepAlive"
+    )
+    flask_thread.start()
 
+    log.info("🌐 Flask Keep-Alive Server gestartet (Port " + str(os.environ.get("PORT", 10000)) + ")")
+
+    # Discord Bot starten
     token = os.getenv("DISCORD_TOKEN")
     if not token:
-        log.error("DISCORD_TOKEN fehlt!")
+        log.error("❌ DISCORD_TOKEN fehlt in den Environment Variables auf Render!")
         exit(1)
 
+    log.info("🚀 Starte Discord Bot...")
     bot.run(token)
