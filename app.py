@@ -69,11 +69,6 @@ def run_flask():
 def home():
     return "VHA Translator • Online"
 
-@app.route("/ping")
-def ping():
-    """Wird von UptimeRobot und Render aufgerufen"""
-    return "pong", 200
-
 
 # ────────────────────────────────────────────────
 # GROQ ASYNC WRAPPER mit Retry
@@ -195,7 +190,7 @@ async def translate_text(text: str, target_lang_name: str) -> str:
         return await groq_call(
             model=GROQ_MODEL,
             temperature=0.15,
-            max_tokens=450,
+            max_tokens=1200,
             messages=[
                 {
                     "role": "system",
@@ -572,7 +567,15 @@ async def on_message(message: discord.Message):
     def make_multi_embed(fields: list, color: int = 0x3498DB) -> discord.Embed:
         embed = discord.Embed(title=f"💬 • {author_name}", color=color)
         for flag, text in fields:
-            embed.add_field(name=flag, value=text[:1000], inline=False)
+            # Discord Embed Felder max. 1024 Zeichen - aufteilen wenn nötig
+            if len(text) <= 1000:
+                embed.add_field(name=flag, value=text, inline=False)
+            else:
+                # Ersten Teil mit Flagge, Rest als Fortsetzung
+                chunks = [text[i:i+1000] for i in range(0, len(text), 1000)]
+                embed.add_field(name=flag, value=chunks[0], inline=False)
+                for chunk in chunks[1:]:
+                    embed.add_field(name="↳", value=chunk, inline=False)
         embed.set_footer(text="VHA Translator", icon_url=LOGO_URL)
         return embed
 
@@ -625,21 +628,11 @@ async def on_message(message: discord.Message):
 # ────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    # Flask-KeepAlive Server im Hintergrund starten (für Render Free-Tier wichtig)
-    flask_thread = threading.Thread(
-        target=run_flask,
-        daemon=True,
-        name="Flask-KeepAlive"
-    )
-    flask_thread.start()
+    threading.Thread(target=run_flask, daemon=True, name="Flask-KeepAlive").start()
 
-    log.info("🌐 Flask Keep-Alive Server gestartet (Port " + str(os.environ.get("PORT", 10000)) + ")")
-
-    # Discord Bot starten
     token = os.getenv("DISCORD_TOKEN")
     if not token:
-        log.error("❌ DISCORD_TOKEN fehlt in den Environment Variables auf Render!")
+        log.error("DISCORD_TOKEN fehlt!")
         exit(1)
 
-    log.info("🚀 Starte Discord Bot...")
     bot.run(token)
