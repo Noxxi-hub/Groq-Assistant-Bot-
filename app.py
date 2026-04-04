@@ -69,6 +69,11 @@ def run_flask():
 def home():
     return "VHA Translator • Online"
 
+@app.route("/ping")
+def ping():
+    """Wird von UptimeRobot und Render aufgerufen"""
+    return "pong", 200
+
 
 # ────────────────────────────────────────────────
 # GROQ ASYNC WRAPPER mit Retry
