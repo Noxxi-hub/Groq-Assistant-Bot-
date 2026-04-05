@@ -7,6 +7,7 @@
 import discord
 from discord.ext import commands
 from pymongo import MongoClient
+from bson import ObjectId
 import os
 import logging
 from log import add_log
@@ -55,6 +56,38 @@ def has_permission(member: discord.Member) -> bool:
     member_roles = {r.name.upper() for r in member.roles}
     allowed_upper = {r.upper() for r in ALLOWED_ROLES}
     return bool(member_roles & allowed_upper)
+
+
+# ────────────────────────────────────────────────
+# Delete View für Koordinaten
+# ────────────────────────────────────────────────
+
+class KoordDeleteView(discord.ui.View):
+    def __init__(self, coord_id: str, coord_name: str):
+        super().__init__(timeout=300)
+        self.coord_id = coord_id
+        self.coord_name = coord_name
+
+    @discord.ui.button(label="🗑️ Löschen / Supprimer / Apagar", style=discord.ButtonStyle.danger)
+    async def delete_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not (interaction.user.guild_permissions.administrator or
+                any(r.name.upper() in {"R5", "R4", "DEV"} for r in interaction.user.roles)):
+            await interaction.response.send_message("❌ Keine Berechtigung.", ephemeral=True)
+            return
+        try:
+            col = get_col()
+            col.delete_one({"_id": ObjectId(self.coord_id)})
+            add_log("Koordinate gelöscht", interaction.user.display_name, self.coord_name)
+            button.disabled = True
+            button.label = "✅ Gelöscht"
+            button.style = discord.ButtonStyle.secondary
+            await interaction.message.edit(view=self)
+            await interaction.response.send_message(
+                f"🗑️ **{self.coord_name}** gelöscht / supprimé / apagado",
+                ephemeral=True
+            )
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Fehler: {e}", ephemeral=True)
 
 
 # ────────────────────────────────────────────────
@@ -114,8 +147,16 @@ class KoordinatenCog(commands.Cog):
                 inline=False
             )
 
-        embed.set_footer(text=f"Gesamt / Total: {len(data)} • !koordinaten add/delete")
+        embed.set_footer(text=f"Gesamt / Total: {len(data)} • !koordinaten add")
         await ctx.send(embed=embed)
+        
+        # Delete Buttons für jede Koordinate
+        await ctx.send("🗑️ **Koordinaten löschen / Supprimer / Apagar:**")
+        for k in data:
+            e = discord.Embed(color=0x2ECC71)
+            e.add_field(name=f"📍 {k['name']}", value=f"R:{k['r']}, X:{k['x']}, Y:{k['y']}", inline=False)
+            view = KoordDeleteView(str(k["_id"]), k["name"])
+            await ctx.send(embed=e, view=view)
 
     # ── !koordinaten add ──────────────────────────
     @koordinaten.command(name="add", aliases=["hinzufügen", "ajouter", "adicionar"])

@@ -216,6 +216,40 @@ def get_warning_seconds(total_seconds: int) -> int:
 
 
 # ────────────────────────────────────────────────
+# Delete View für Timer
+# ────────────────────────────────────────────────
+
+class TimerDeleteView(discord.ui.View):
+    def __init__(self, timer_id: str, event_name: str, author: discord.Member):
+        super().__init__(timeout=300)
+        self.timer_id = timer_id
+        self.event_name = event_name
+        self.author = author
+
+    @discord.ui.button(label="🗑️ Löschen / Supprimer / Apagar", style=discord.ButtonStyle.danger)
+    async def delete_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not (interaction.user.id == self.author.id or
+                interaction.user.guild_permissions.administrator or
+                any(r.name.upper() in {"R5", "R4", "DEV"} for r in interaction.user.roles)):
+            await interaction.response.send_message("❌ Keine Berechtigung.", ephemeral=True)
+            return
+        try:
+            from bson import ObjectId
+            col = get_db()
+            col.delete_one({"_id": ObjectId(self.timer_id)})
+            button.disabled = True
+            button.label = "✅ Gelöscht / Supprimé / Apagado"
+            button.style = discord.ButtonStyle.secondary
+            await interaction.message.edit(view=self)
+            await interaction.response.send_message(
+                f"🗑️ **{self.event_name}** gelöscht / supprimé / apagado",
+                ephemeral=True
+            )
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Fehler: {e}", ephemeral=True)
+
+
+# ────────────────────────────────────────────────
 # Cog
 # ────────────────────────────────────────────────
 
@@ -377,19 +411,25 @@ class TimerCog(commands.Cog):
             await ctx.send("📭 Keine aktiven Timer. / Aucun minuteur actif. / Nenhum lembrete ativo.")
             return
 
-        embed = discord.Embed(title="⏱️ Aktive Timer / Minuteurs actifs / Lembretes ativos", color=0x3498DB)
+        # Jeden Timer als separate Nachricht mit Delete-Button
+        await ctx.send(f"⏱️ **Aktive Timer / Minuteurs actifs / Lembretes ativos** ({len(timers)})")
+
+        now = datetime.now(timezone.utc).timestamp()
         for t in timers:
             remaining = int(t["end_timestamp"] - now)
             name_de = t["event"]
             name_fr = t.get("event_fr", name_de)
             name_pt = t.get("event_pt", name_de)
+
+            embed = discord.Embed(color=0x3498DB)
             embed.add_field(
                 name=f"🇩🇪 {name_de} / 🇫🇷 {name_fr} / 🇧🇷 {name_pt}",
                 value=f"⏳ Noch / Reste / Falta: **{format_duration(remaining)}**\n👤 {t['author']}",
                 inline=False
             )
-        embed.set_footer(text=f"Gesamt / Total: {len(timers)}")
-        await ctx.send(embed=embed)
+
+            view = TimerDeleteView(str(t["_id"]), t["event"], ctx.author)
+            await ctx.send(embed=embed, view=view)
 
     # ── !timer delete ────────────────────────────
     @timer.command(name="delete", aliases=["löschen", "supprimer", "del", "remove", "cancel", "abbrechen", "annuler", "apagar"])

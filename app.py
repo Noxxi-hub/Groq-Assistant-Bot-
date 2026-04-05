@@ -307,6 +307,11 @@ async def on_ready():
     except Exception as e:
         errors.append(f"❌ sprachen: {e}")
 
+    try:
+        await bot.load_extension("svs")
+    except Exception as e:
+        errors.append(f"❌ svs: {e}")
+
     log.info(f"→ {bot.user}  •  ONLINE  •  {discord.utils.utcnow():%Y-%m-%d %H:%M UTC}")
 
     if BOT_LOG_CHANNEL_ID:
@@ -323,7 +328,8 @@ async def on_ready():
                     "🔧 spieler.py • geladen\n"
                     "🔧 event.py • geladen\n"
                     "🔧 log.py • geladen\n"
-                    "🔧 sprachen.py • geladen"
+                    "🔧 sprachen.py • geladen\n"
+                    "🔧 svs.py • geladen"
                 )
             await channel.send(msg)
 
@@ -387,6 +393,17 @@ async def cmd_help(ctx):
         value=(
             "`!event` – Event aus Screenshot erkennen & Timer setzen\n"
             "Als Reply auf Event-Screenshot tippen / En réponse à une capture / Em resposta a uma captura"
+        ),
+        inline=False
+    )
+
+    embed.add_field(
+        name="⚔️ SVS Koordinaten  🔐 R5 • R4",
+        value=(
+            "`!svs` – Alle Server & Koordinaten\n"
+            "`!svs R77` – Server R77 mit Delete-Buttons\n"
+            "`!svs server` – Verfügbare Server\n"
+            "`!svs add SERVER NAME R X Y` – Hinzufügen"
         ),
         inline=False
     )
