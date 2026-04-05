@@ -27,6 +27,129 @@ LOGO_URL = (
     "?ex=69bd8dd7&is=69bc3c57&hm=de6fea399dd30f97d2a14e1515c9e7f91d81d0d9ea111f13e0757d42eb12a0e5&"
 )
 
+ALL_LANGS = {
+    "DE": {"flag": "🇩🇪", "name": "Deutsch"},
+    "FR": {"flag": "🇫🇷", "name": "Français"},
+    "PT": {"flag": "🇧🇷", "name": "Português"},
+    "EN": {"flag": "🇬🇧", "name": "English"},
+    "JA": {"flag": "🇯🇵", "name": "日本語"},
+}
+FIXED_LANGS = {"DE", "FR"}
+
+
+def get_active_langs_from_db() -> set:
+    try:
+        client = MongoClient(os.getenv("MONGODB_URI"))
+        col = client["vhabot"]["sprachen"]
+        doc = col.find_one({"_id": "settings"})
+        if doc:
+            active = set(doc.get("active", ["DE", "FR"]))
+            active.update(FIXED_LANGS)
+            return active
+        return {"DE", "FR"}
+    except Exception:
+        return {"DE", "FR"}
+
+
+class TimerLangView(discord.ui.View):
+    """Sprach-Auswahl für manuell gesetzte Timer."""
+    def __init__(self, author: discord.Member, event: str, seconds: int,
+                 display_time: str, selected_langs: set):
+        super().__init__(timeout=120)
+        self.author = author
+        self.event = event
+        self.seconds = seconds
+        self.display_time = display_time
+        self.selected_langs = selected_langs.copy()
+        self.confirmed = False
+        self._build_buttons()
+
+    def _build_buttons(self):
+        self.clear_items()
+        for code, info in ALL_LANGS.items():
+            is_selected = code in self.selected_langs
+            is_fixed = code in FIXED_LANGS
+            btn = discord.ui.Button(
+                label=f"{info['flag']} {info['name']}",
+                style=discord.ButtonStyle.success if is_selected else discord.ButtonStyle.secondary,
+                emoji="✅" if is_selected else "❌",
+                custom_id=f"tlang_{code}",
+                disabled=is_fixed
+            )
+            btn.callback = self._make_callback(code)
+            self.add_item(btn)
+
+        confirm = discord.ui.Button(label="⏱️ Timer setzen", style=discord.ButtonStyle.primary, custom_id="t_confirm", row=2)
+        confirm.callback = self._confirm
+        self.add_item(confirm)
+
+        cancel = discord.ui.Button(label="❌ Abbrechen", style=discord.ButtonStyle.danger, custom_id="t_cancel", row=2)
+        cancel.callback = self._cancel
+        self.add_item(cancel)
+
+    def _make_callback(self, code: str):
+        async def callback(interaction: discord.Interaction):
+            if interaction.user.id != self.author.id:
+                await interaction.response.send_message("❌ Nur du kannst das ändern.", ephemeral=True)
+                return
+            if code in self.selected_langs:
+                self.selected_langs.discard(code)
+            else:
+                self.selected_langs.add(code)
+            self._build_buttons()
+            await interaction.response.edit_message(view=self)
+        return callback
+
+    async def _confirm(self, interaction: discord.Interaction):
+        if interaction.user.id != self.author.id:
+            await interaction.response.send_message("❌ Nur du kannst bestätigen.", ephemeral=True)
+            return
+        if self.confirmed:
+            return
+        self.confirmed = True
+
+        try:
+            col = get_db()
+            end_timestamp = datetime.now(timezone.utc).timestamp() + self.seconds
+            col.insert_one({
+                "event": self.event,
+                "event_fr": self.event,
+                "event_pt": self.event,
+                "event_en": self.event,
+                "event_ja": self.event,
+                "duration_seconds": self.seconds,
+                "end_timestamp": end_timestamp,
+                "channel_id": interaction.channel.id,
+                "author": self.author.display_name,
+                "warned": False,
+                "notify_langs": list(self.selected_langs)
+            })
+            add_log("Timer gesetzt", self.author.display_name, f"{self.event} ({format_duration(self.seconds)})")
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Fehler: {e}", ephemeral=True)
+            return
+
+        for item in self.children:
+            item.disabled = True
+        await interaction.message.edit(view=self)
+
+        embed = discord.Embed(title=f"⏱️ Timer gesetzt • {self.event}", color=0x57F287)
+        embed.add_field(name="⏳ Zeit", value=f"**{self.display_time}**", inline=False)
+        langs_str = " • ".join([f"{ALL_LANGS[c]['flag']} {ALL_LANGS[c]['name']}" for c in self.selected_langs if c in ALL_LANGS])
+        embed.add_field(name="🌐 Benachrichtigung in", value=langs_str, inline=False)
+        embed.set_footer(text=f"Gesetzt von {self.author.display_name}")
+        await interaction.response.send_message(embed=embed)
+
+    async def _cancel(self, interaction: discord.Interaction):
+        if interaction.user.id != self.author.id:
+            await interaction.response.send_message("❌ Nur du kannst abbrechen.", ephemeral=True)
+            return
+        for item in self.children:
+            item.disabled = True
+        await interaction.message.edit(view=self)
+        await interaction.response.send_message("❌ Timer abgebrochen.")
+
+
 # ────────────────────────────────────────────────
 # MongoDB Verbindung
 # ────────────────────────────────────────────────
@@ -124,13 +247,24 @@ class TimerCog(commands.Cog):
                     name_de = t["event"]
                     name_fr = t.get("event_fr", name_de)
                     name_pt = t.get("event_pt", name_de)
+                    name_en = t.get("event_en", name_de)
+                    name_ja = t.get("event_ja", name_de)
+                    notify_langs = set(t.get("notify_langs", ["DE", "FR"]))
+
                     embed = discord.Embed(
                         title=f"⚠️ Vorwarnung / Avertissement / Aviso • {name_de}",
                         color=0xF39C12
                     )
-                    embed.add_field(name="🇩🇪 Startet in", value=f"**{name_de}** in **{time_left}**! Macht euch bereit! ⚔️", inline=False)
-                    embed.add_field(name="🇫🇷 Commence dans", value=f"**{name_fr}** dans **{time_left}** ! Préparez-vous ! ⚔️", inline=False)
-                    embed.add_field(name="🇧🇷 Começa em", value=f"**{name_pt}** em **{time_left}**! Preparem-se! ⚔️", inline=False)
+                    if "DE" in notify_langs:
+                        embed.add_field(name="🇩🇪 Startet in", value=f"**{name_de}** in **{time_left}**! Macht euch bereit! ⚔️", inline=False)
+                    if "FR" in notify_langs:
+                        embed.add_field(name="🇫🇷 Commence dans", value=f"**{name_fr}** dans **{time_left}** ! Préparez-vous ! ⚔️", inline=False)
+                    if "PT" in notify_langs:
+                        embed.add_field(name="🇧🇷 Começa em", value=f"**{name_pt}** em **{time_left}**! Preparem-se! ⚔️", inline=False)
+                    if "EN" in notify_langs:
+                        embed.add_field(name="🇬🇧 Starts in", value=f"**{name_en}** in **{time_left}**! Get ready! ⚔️", inline=False)
+                    if "JA" in notify_langs:
+                        embed.add_field(name="🇯🇵 開始まで", value=f"**{name_ja}** まで **{time_left}**！準備して！⚔️", inline=False)
                     embed.set_footer(text=f"Gesetzt von / Défini par / Definido por {t['author']}")
 
                     for channel_id in ANNOUNCEMENT_CHANNELS:
@@ -151,13 +285,24 @@ class TimerCog(commands.Cog):
                     name_de = t["event"]
                     name_fr = t.get("event_fr", name_de)
                     name_pt = t.get("event_pt", name_de)
+                    name_en = t.get("event_en", name_de)
+                    name_ja = t.get("event_ja", name_de)
+                    notify_langs = set(t.get("notify_langs", ["DE", "FR"]))
+
                     embed = discord.Embed(
                         title=f"⏰ Erinnerung / Rappel / Lembrete • {name_de}",
                         color=0xE74C3C
                     )
-                    embed.add_field(name="🇩🇪 Deutsch", value=f"**{name_de}** beginnt jetzt! ⚔️", inline=False)
-                    embed.add_field(name="🇫🇷 Français", value=f"**{name_fr}** commence maintenant ! ⚔️", inline=False)
-                    embed.add_field(name="🇧🇷 Português", value=f"**{name_pt}** começa agora! ⚔️", inline=False)
+                    if "DE" in notify_langs:
+                        embed.add_field(name="🇩🇪 Deutsch", value=f"**{name_de}** beginnt jetzt! ⚔️", inline=False)
+                    if "FR" in notify_langs:
+                        embed.add_field(name="🇫🇷 Français", value=f"**{name_fr}** commence maintenant ! ⚔️", inline=False)
+                    if "PT" in notify_langs:
+                        embed.add_field(name="🇧🇷 Português", value=f"**{name_pt}** começa agora! ⚔️", inline=False)
+                    if "EN" in notify_langs:
+                        embed.add_field(name="🇬🇧 English", value=f"**{name_en}** starts now! ⚔️", inline=False)
+                    if "JA" in notify_langs:
+                        embed.add_field(name="🇯🇵 日本語", value=f"**{name_ja}** が始まります！⚔️", inline=False)
                     embed.set_footer(text=f"Gesetzt von / Défini par / Definido por {t['author']}")
 
                     for channel_id in ANNOUNCEMENT_CHANNELS:
@@ -204,34 +349,18 @@ class TimerCog(commands.Cog):
             await ctx.send("❌ Ungültiges Format. Beispiele: `30m`, `2h`, `1h30m`, `3d`")
             return
 
-        end_timestamp = datetime.now(timezone.utc).timestamp() + seconds
-
-        try:
-            col = get_db()
-            col.insert_one({
-                "event": event,
-                "duration_seconds": seconds,
-                "end_timestamp": end_timestamp,
-                "channel_id": ctx.channel.id,
-                "author": ctx.author.display_name,
-                "warned": False
-            })
-        except Exception as e:
-            log.error(f"MongoDB Speicher-Fehler: {e}")
-            await ctx.send("❌ Fehler beim Speichern des Timers.")
-            return
-
+        # Sprach-Auswahl anzeigen statt direkt speichern
+        active_langs = get_active_langs_from_db()
         embed = discord.Embed(
-            title=f"⏱️ Timer gesetzt / Minuteur défini / Lembrete definido • {event}",
-            color=0x57F287
+            title=f"⏱️ Timer konfigurieren • {event}",
+            color=0xF39C12
         )
-        embed.add_field(name="🇩🇪 Erinnerung in", value=f"**{format_duration(seconds)}**", inline=True)
-        embed.add_field(name="🇫🇷 Rappel dans", value=f"**{format_duration(seconds)}**", inline=True)
-        embed.add_field(name="🇧🇷 Lembrete em", value=f"**{format_duration(seconds)}**", inline=True)
-        embed.add_field(name="📍 Event", value=event, inline=False)
-        add_log("Timer gesetzt", ctx.author.display_name, f"{event} ({format_duration(seconds)})")
-        embed.set_footer(text=f"Gesetzt von / Défini par / Definido por {ctx.author.display_name}")
-        await ctx.send(embed=embed)
+        embed.add_field(name="📍 Event", value=event, inline=True)
+        embed.add_field(name="⏳ Zeit", value=f"**{format_duration(seconds)}**", inline=True)
+        embed.set_footer(text="Wähle Sprachen für die Erinnerung, dann Timer setzen!")
+
+        view = TimerLangView(ctx.author, event, seconds, format_duration(seconds), active_langs)
+        await ctx.send(embed=embed, view=view)
 
     # ── !timer list ──────────────────────────────
     @timer.command(name="list", aliases=["liste", "all", "alle", "lista"])
