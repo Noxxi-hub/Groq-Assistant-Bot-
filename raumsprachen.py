@@ -44,14 +44,21 @@ def get_col():
 def get_room_langs(channel_id: int) -> set | None:
     """
     Gibt die aktiven Sprachen für einen Raum zurück.
-    Gibt None zurück wenn der Raum keine eigenen Einstellungen hat.
+    - None  → kein Eintrag → globale Einstellungen verwenden
+    - set() → leere Menge / disabled=True → Übersetzung deaktiviert
+    - set mit Codes → nur diese Sprachen übersetzen
     """
     try:
         col = get_col()
         doc = col.find_one({"_id": str(channel_id)})
         if not doc:
-            return None
-        return set(doc.get("active", []))
+            return None  # Kein Eintrag → globale Einstellungen
+        if doc.get("disabled", False):
+            return set()  # Explizit deaktiviert
+        active = set(doc.get("active", []))
+        if not active:
+            return set()  # Leere Liste = deaktiviert
+        return active
     except Exception as e:
         log.error(f"Fehler beim Laden der Raumsprachen: {e}")
         return None
@@ -71,12 +78,17 @@ def set_room_langs(channel_id: int, langs: set):
 
 
 def delete_room_langs(channel_id: int):
-    """Löscht die Raumeinstellungen (Raum nutzt dann keine Übersetzung)."""
+    """Setzt den Raum auf 'deaktiviert' = leere Liste in MongoDB.
+    Wichtig: NICHT löschen, sonst fällt app.py auf globale Einstellungen zurück!"""
     try:
         col = get_col()
-        col.delete_one({"_id": str(channel_id)})
+        col.update_one(
+            {"_id": str(channel_id)},
+            {"$set": {"active": [], "disabled": True}},
+            upsert=True
+        )
     except Exception as e:
-        log.error(f"Fehler beim Löschen der Raumsprachen: {e}")
+        log.error(f"Fehler beim Deaktivieren der Raumsprachen: {e}")
 
 
 def has_permission(member: discord.Member) -> bool:
@@ -115,15 +127,25 @@ class RaumSprachenView(discord.ui.View):
             btn.callback = self._make_callback(code)
             self.add_item(btn)
 
-        # Reset-Button
-        reset_btn = discord.ui.Button(
-            label="🗑️ Übersetzung deaktivieren",
+        # Button: Übersetzung für diesen Raum deaktivieren
+        disable_btn = discord.ui.Button(
+            label="🚫 Übersetzung deaktivieren",
             style=discord.ButtonStyle.danger,
-            custom_id=f"raumsprache_{self.channel_id}_RESET",
+            custom_id=f"raumsprache_{self.channel_id}_DISABLE",
             row=2
         )
-        reset_btn.callback = self._reset_callback
-        self.add_item(reset_btn)
+        disable_btn.callback = self._disable_callback
+        self.add_item(disable_btn)
+
+        # Button: Raum auf globale Einstellungen zurücksetzen
+        global_btn = discord.ui.Button(
+            label="🌐 Globale Einstellungen",
+            style=discord.ButtonStyle.secondary,
+            custom_id=f"raumsprache_{self.channel_id}_GLOBAL",
+            row=2
+        )
+        global_btn.callback = self._global_callback
+        self.add_item(global_btn)
 
     def _make_callback(self, code: str):
         async def callback(interaction: discord.Interaction):
@@ -157,7 +179,8 @@ class RaumSprachenView(discord.ui.View):
 
         return callback
 
-    async def _reset_callback(self, interaction: discord.Interaction):
+    async def _disable_callback(self, interaction: discord.Interaction):
+        """Übersetzung für diesen Raum komplett deaktivieren (in MongoDB gespeichert)."""
         if interaction.user.id != self.author.id:
             await interaction.response.send_message(
                 "❌ Nur derjenige der den Befehl ausgeführt hat kann Änderungen vornehmen.",
@@ -165,12 +188,36 @@ class RaumSprachenView(discord.ui.View):
             )
             return
 
-        delete_room_langs(self.channel_id)
+        delete_room_langs(self.channel_id)  # Speichert disabled=True in MongoDB
         self._update_buttons()
         embed = self._make_embed()
         await interaction.response.edit_message(embed=embed, view=self)
         await interaction.followup.send(
-            f"🗑️ Übersetzung für <#{self.channel_id}> **vollständig deaktiviert**.",
+            f"🚫 Übersetzung für <#{self.channel_id}> **deaktiviert** (bleibt nach Neustart deaktiviert).",
+            ephemeral=True
+        )
+
+    async def _global_callback(self, interaction: discord.Interaction):
+        """Raum auf globale Einstellungen zurücksetzen (Eintrag aus MongoDB löschen)."""
+        if interaction.user.id != self.author.id:
+            await interaction.response.send_message(
+                "❌ Nur derjenige der den Befehl ausgeführt hat kann Änderungen vornehmen.",
+                ephemeral=True
+            )
+            return
+
+        try:
+            col = get_col()
+            col.delete_one({"_id": str(self.channel_id)})
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Fehler: {e}", ephemeral=True)
+            return
+
+        self._update_buttons()
+        embed = self._make_embed()
+        await interaction.response.edit_message(embed=embed, view=self)
+        await interaction.followup.send(
+            f"🌐 <#{self.channel_id}> nutzt jetzt wieder die **globalen Spracheinstellungen**.",
             ephemeral=True
         )
 

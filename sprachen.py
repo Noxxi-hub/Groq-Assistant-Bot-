@@ -45,8 +45,14 @@ def get_active_langs() -> set:
         col = get_col()
         doc = col.find_one({"_id": "settings"})
         if not doc:
-            # Standard: nur PT aktiv
-            return {"DE", "FR", "PT"}
+            # Kein Eintrag → Standardwerte in MongoDB schreiben
+            default = {"DE", "FR", "PT"}
+            col.update_one(
+                {"_id": "settings"},
+                {"$set": {"active": list(default)}},
+                upsert=True
+            )
+            return default
         active = set(doc.get("active", ["DE", "FR", "PT"]))
         # DE und FR immer erzwingen
         active.update(FIXED_LANGS)
@@ -117,10 +123,10 @@ class SprachenView(discord.ui.View):
             try:
                 col = get_col()
                 doc = col.find_one({"_id": "settings"})
-                active = set(doc.get("active", ["DE", "FR"])) if doc else {"DE", "FR"}
-                active.update({"DE", "FR"})  # immer drin
+                active = set(doc.get("active", ["DE", "FR", "PT"])) if doc else {"DE", "FR", "PT"}
+                active.update(FIXED_LANGS)  # DE + FR immer drin
             except Exception:
-                active = {"DE", "FR"}
+                active = {"DE", "FR", "PT"}
 
             if code in active:
                 active.discard(code)
@@ -196,6 +202,16 @@ class SprachenCog(commands.Cog):
         if not has_permission(ctx.author):
             await ctx.send("❌ Keine Berechtigung / Pas d'autorisation / Sem permissão", delete_after=5)
             return
+
+        # Alte !sprachen Nachrichten im Kanal löschen (verhindert Duplikate)
+        try:
+            async for msg in ctx.channel.history(limit=20):
+                if msg.author == ctx.guild.me and msg.embeds:
+                    title = msg.embeds[0].title or ""
+                    if "Spracheinstellungen" in title:
+                        await msg.delete()
+        except Exception:
+            pass
 
         view = SprachenView(ctx.author)
         embed = view._make_embed()

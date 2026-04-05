@@ -160,12 +160,18 @@ async def detect_language_llm(text: str) -> str:
                 {"role": "user", "content": text}
             ]
         )
-        result = result.upper()
-        if result == "OTHER":
+        result = result.upper().strip()
+        # ZH-CN, ZH-TW etc. → ZH normalisieren
+        if result.startswith("ZH"):
+            lang = "ZH"
+        elif result.startswith("PT"):
+            lang = "PT"
+        elif result == "OTHER":
             lang = "OTHER"
         elif re.match(r'^[A-Z]{2}$', result):
             lang = result
         else:
+            # Versuche ersten 2-Buchstaben-Code zu extrahieren
             m = re.search(r'\b([A-Z]{2})\b', result)
             lang = m.group(1) if m else "OTHER"
 
@@ -218,17 +224,11 @@ async def translate_text(text: str, target_lang_name: str) -> str:
 # Importiere get_active_langs lazy (nach Bot-Start)
 def get_active_languages() -> set:
     try:
-        from sprachen import get_active_langs, get_col as sprachen_col
-        # Direkt aus MongoDB lesen statt Import
-        col = sprachen_col()
-        doc = col.find_one({"_id": "settings"})
-        if doc:
-            active = set(doc.get("active", ["DE", "FR"]))
-            active.update({"DE", "FR"})  # DE + FR immer
-            return active
-        return {"DE", "FR"}  # Fallback: nur DE + FR, kein PT automatisch
+        from sprachen import get_active_langs
+        # get_active_langs liest direkt aus MongoDB inkl. FIXED_LANGS
+        return get_active_langs()
     except Exception:
-        return {"DE", "FR"}  # Fallback: nur DE + FR
+        return {"DE", "FR", "PT"}  # Fallback
 
 LANG_FLAGS = {
     "DE": "🇩🇪", "FR": "🇫🇷", "PT": "🇧🇷", "EN": "🇬🇧",
@@ -567,7 +567,7 @@ async def on_message(message: discord.Message):
     content = message.content.strip()
 
     # Zu kurz, nur Link oder nur Emoji → skip
-    if len(content) < 3:
+    if len(content) < 2:
         return
     if re.match(r'^https?://', content):
         return
