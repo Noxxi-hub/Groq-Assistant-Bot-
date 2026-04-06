@@ -419,7 +419,8 @@ async def cmd_help(ctx):
         value=(
             "`!sprachen` / `!languages` / `!idiomas` – Globale Sprachen ein/ausschalten mit Buttons\n"
             "`!raumsprachen [Kanal-ID]` – Sprachen nur für einen bestimmten Raum einstellen (nur Bot-Kanal, nur R5/Dev)\n"
-            "💡 Kein Eintrag = globale Einstellungen • 🗑️ Deaktivieren = keine Übersetzung im Raum"
+            "`!kanalid` – Alle Kanäle mit ID als Direktnachricht (für !raumsprachen)\n"
+            "💡 Kein Eintrag = globale Einstellungen • 🚫 Deaktivieren = keine Übersetzung im Raum"
         ),
         inline=False
     )
@@ -536,6 +537,56 @@ async def cmd_ai(ctx, *, question: str = None):
     embed.add_field(name="→ Deine Frage", value=question[:900], inline=False)
     embed.set_footer(text=f"VHA • Groq • {GROQ_MODEL} • {footer}", icon_url=LOGO_URL)
     await thinking.edit(embed=embed)
+
+
+# ────────────────────────────────────────────────
+# KANAL-IDs ANZEIGEN
+# ────────────────────────────────────────────────
+
+@bot.command(name="kanalid", aliases=["channelid", "kanalids"])
+async def cmd_kanalid(ctx):
+    """Zeigt alle Textkanäle mit ihrer ID — nur für den Aufrufer sichtbar."""
+    if not ctx.author.guild_permissions.administrator:
+        member_roles = {r.name.upper() for r in ctx.author.roles}
+        if not member_roles & {"R5", "R4", "DEV"}:
+            await ctx.send("❌ Keine Berechtigung.", delete_after=5)
+            return
+
+    lines = []
+    for category, channels in ctx.guild.by_category():
+        cat_name = category.name if category else "Ohne Kategorie"
+        text_channels = [c for c in channels if isinstance(c, discord.TextChannel)]
+        if not text_channels:
+            continue
+        lines.append(f"**{cat_name}**")
+        for ch in text_channels:
+            lines.append(f"• #{ch.name} — `{ch.id}`")
+
+    # Aufteilen falls zu lang für eine Nachricht
+    chunks = []
+    current = []
+    length = 0
+    for line in lines:
+        if length + len(line) > 1800:
+            chunks.append("\n".join(current))
+            current = [line]
+            length = len(line)
+        else:
+            current.append(line)
+            length += len(line)
+    if current:
+        chunks.append("\n".join(current))
+
+    for i, chunk in enumerate(chunks):
+        embed = discord.Embed(
+            title=f"📋 Kanal-IDs • {ctx.guild.name}" + (f" ({i+1}/{len(chunks)})" if len(chunks) > 1 else ""),
+            description=chunk,
+            color=0x5865F2
+        )
+        embed.set_footer(text="Nur für dich sichtbar • Für !raumsprachen [ID] verwenden")
+        await ctx.author.send(embed=embed)
+
+    await ctx.send("📬 Ich habe dir die Kanal-IDs als Direktnachricht geschickt!", delete_after=8)
 
 
 # ────────────────────────────────────────────────
