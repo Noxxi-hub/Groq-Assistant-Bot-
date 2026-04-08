@@ -175,8 +175,9 @@ async def detect_language_llm(text: str) -> str:
             m = re.search(r'\b([A-Z]{2})\b', result)
             lang = m.group(1) if m else "OTHER"
 
-        # Cache nur für kurze Texte
-        if len(key) < 80:
+        # Cache nur für kurze Texte und gültige Codes
+        known = {"DE","FR","PT","EN","JA","ZH","KO","ES","IT","RU","AR","TR","PL","NL","OTHER"}
+        if len(key) < 80 and lang in known:
             lang_cache[key] = lang
             if len(lang_cache) > 500:
                 # Älteste 100 Einträge löschen
@@ -617,11 +618,23 @@ async def on_message(message: discord.Message):
 
     content = message.content.strip()
 
-    # Zu kurz, nur Link oder nur Emoji → skip
+    # Kein Text-Inhalt (nur Anhänge, GIFs, Sticker, Embeds) → skip
+    if not content:
+        return
+
+    # Zu kurz → skip
     if len(content) < 2:
         return
-    if re.match(r'^https?://', content):
+
+    # Nur ein Link → skip (inkl. Tenor/Giphy GIFs)
+    if re.match(r'^https?://\S+$', content):
         return
+
+    # Tenor / Giphy GIF-Links rausfiltern (auch wenn Text dabei)
+    content_cleaned = re.sub(r'https?://\S+', '', content).strip()
+    if not content_cleaned or len(content_cleaned) < 2:
+        return
+    content = content_cleaned
 
     # Cooldown pro User
     now = time.time()
