@@ -332,7 +332,7 @@ def get_active_languages() -> set:
         # get_active_langs liest direkt aus MongoDB inkl. FIXED_LANGS
         return get_active_langs()
     except Exception:
-        return {"DE", "FR", "PT"}  # Fallback
+        return {"DE", "FR"}  # Fallback Haupt-Bot
 
 LANG_FLAGS = {
     "DE": "🇩🇪", "FR": "🇫🇷", "PT": "🇧🇷", "EN": "🇬🇧",
@@ -811,7 +811,8 @@ async def on_message(message: discord.Message):
         else:
             active_langs = get_active_languages()  # Globale Einstellungen
 
-        # Alle Ziel-Sprachen bestimmen — gilt für ALLE Ausgangssprachen
+        # Haupt-Bot: feste Zielsprachen DE+FR, Rest zuschaltbar
+        # PT/EN/JA/ZH/KO werden vom Übersetzer-Bot übernommen
         ALL_LANGS = [
             ("DE", "German",               "🇩🇪 Deutsch"),
             ("FR", "French",               "🇫🇷 Français"),
@@ -820,12 +821,24 @@ async def on_message(message: discord.Message):
             ("JA", "Japanese",             "🇯🇵 日本語"),
             ("ZH", "Chinese",              "🇨🇳 中文"),
             ("KO", "Korean",               "🇰🇷 한국어"),
+            ("ES", "Spanish",              "🇪🇸 Español"),
+            ("IT", "Italian",              "🇮🇹 Italiano"),
+            ("RU", "Russian",              "🇷🇺 Русский"),
+            ("AR", "Arabic",               "🇸🇦 العربية"),
+            ("TR", "Turkish",              "🇹🇷 Türkçe"),
         ]
 
+        # Haupt-Bot übersetzt NUR in seine aktiven Sprachen
+        # Nachrichten die bereits DE oder FR sind → auch übersetzen
+        # Nachrichten in PT/EN/JA/ZH/KO → Übersetzer-Bot macht das
         target_langs = [
             t for t in ALL_LANGS
             if t[0] != lang and t[0] in active_langs
         ]
+
+        # Wenn keine Zielsprachen → skip (Übersetzer-Bot übernimmt)
+        if not target_langs:
+            return
 
         # Ein einziger API-Call für alle Sprachen → spart 80% der Requests
         translations = await translate_all(content, target_langs)
