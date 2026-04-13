@@ -469,9 +469,8 @@ async def cmd_help(ctx):
     embed.add_field(
         name="📍 Koordinaten / Coordonnées / Coordenadas  🔐 R5 • R4",
         value=(
-            "`!koordinaten` / `!coordonnees` – Liste anzeigen / Afficher / Ver lista\n"
-            "`!koordinaten add NAME R X Y` – Hinzufügen / Ajouter / Adicionar\n"
-            "`!koordinaten delete NAME` – Löschen / Supprimer / Apagar"
+            "`!koordinaten` / `!coordonnees` – Liste mit 🗑️ Delete-Buttons\n"
+            "`!koordinaten add NAME R X Y` – Hinzufügen / Ajouter / Adicionar"
         ),
         inline=False
     )
@@ -489,9 +488,8 @@ async def cmd_help(ctx):
     embed.add_field(
         name="⏱️ Timer / Rappel / Lembrete  🔐 R5 • R4",
         value=(
-            "`!timer 2h Kriegsstart` / `!rappel 2h Event` – Timer setzen / Définir / Definir\n"
-            "`!timer list` – Aktive Timer / Minuteurs / Lembretes ativos\n"
-            "`!timer delete NAME` – Löschen / Supprimer / Apagar\n"
+            "`!timer 2h Kriegsstart` / `!rappel 2h Event` – Timer setzen\n"
+            "`!timer list` – Aktive Timer mit 🗑️ Delete-Buttons\n"
             "⏳ Formate: `30m` • `2h` • `1h30m` • `3d`"
         ),
         inline=False
@@ -501,7 +499,7 @@ async def cmd_help(ctx):
         name="🎮 Events  🔐 R5 • R4",
         value=(
             "`!event` – Event aus Screenshot erkennen & Timer setzen\n"
-            "Als Reply auf Event-Screenshot tippen / En réponse à une capture / Em resposta a uma captura"
+            "Als Reply auf Event-Screenshot tippen / En réponse à une capture d'écran"
         ),
         inline=False
     )
@@ -510,7 +508,7 @@ async def cmd_help(ctx):
         name="⚔️ SVS Koordinaten  🔐 R5 • R4",
         value=(
             "`!svs` – Alle Server & Koordinaten\n"
-            "`!svs R77` – Server R77 mit Delete-Buttons\n"
+            "`!svs R77` – Server R77 mit 🗑️ Delete-Buttons\n"
             "`!svs server` – Verfügbare Server\n"
             "`!svs add SERVER NAME R X Y` – Hinzufügen"
         ),
