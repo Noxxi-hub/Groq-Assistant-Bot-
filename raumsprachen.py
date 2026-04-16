@@ -36,9 +36,21 @@ ALL_ROOM_LANGS = {
 }
 
 
+_mongo_client: MongoClient | None = None
+
+def _get_client() -> MongoClient:
+    global _mongo_client
+    if _mongo_client is None:
+        _mongo_client = MongoClient(
+            os.getenv("MONGODB_URI"),
+            serverSelectionTimeoutMS=5000,
+            connectTimeoutMS=5000,
+            socketTimeoutMS=5000,
+        )
+    return _mongo_client
+
 def get_col():
-    client = MongoClient(os.getenv("MONGODB_URI"))
-    return client["vhabot"]["raumsprachen"]
+    return _get_client()["vhabot"]["raumsprachen"]
 
 
 def get_room_langs(channel_id: int) -> set | None:

@@ -325,14 +325,34 @@ async def translate_text(text: str, target_lang_name: str) -> str:
 # ────────────────────────────────────────────────
 # FLAGGEN & SPRACHNAMEN
 # ────────────────────────────────────────────────
-# Importiere get_active_langs lazy (nach Bot-Start)
+# Import einmalig beim Start — nicht bei jedem on_message neu
 def get_active_languages() -> set:
     try:
         from sprachen import get_active_langs
-        # get_active_langs liest direkt aus MongoDB inkl. FIXED_LANGS
         return get_active_langs()
     except Exception:
         return {"DE", "FR"}  # Fallback Haupt-Bot
+
+
+# Einmalig beim Modulstart importieren — nicht bei jeder Nachricht
+try:
+    from sprachen import get_active_langs as _sprachen_get_active
+    from raumsprachen import get_room_langs as _raumsprachen_get_room
+    def get_active_languages() -> set:
+        try:
+            return _sprachen_get_active()
+        except Exception:
+            return {"DE", "FR"}
+    def _get_room_langs_safe(channel_id: int):
+        try:
+            return _raumsprachen_get_room(channel_id)
+        except Exception:
+            return None
+except Exception:
+    def get_active_languages() -> set:
+        return {"DE", "FR"}
+    def _get_room_langs_safe(channel_id: int):
+        return None
 
 LANG_FLAGS = {
     "DE": "🇩🇪", "FR": "🇫🇷", "PT": "🇧🇷", "EN": "🇬🇧",
@@ -818,11 +838,8 @@ async def on_message(message: discord.Message):
         # Raum hat eigene Einstellungen → diese nutzen (überschreibt globale)
         # Raum hat KEINE Einstellungen → globale Sprachen nutzen (normales Verhalten)
         # Raum wurde explizit deaktiviert (leere Liste) → gar nicht übersetzen
-        try:
-            from raumsprachen import get_room_langs
-            room_langs = get_room_langs(message.channel.id)
-        except Exception:
-            room_langs = None
+        # ── Raum-spezifische Sprachen prüfen ──
+        room_langs = _get_room_langs_safe(message.channel.id)
 
         if room_langs is not None:
             if len(room_langs) == 0:

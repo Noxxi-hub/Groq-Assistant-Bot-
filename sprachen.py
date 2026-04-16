@@ -34,9 +34,25 @@ OPTIONAL_LANGS = {
 ALLOWED_ROLES = {"R5", "R4", "dev"}
 
 
+# ────────────────────────────────────────────────
+# MongoDB — einmalige Verbindung (Connection Pool)
+# ────────────────────────────────────────────────
+
+_mongo_client: MongoClient | None = None
+
+def _get_client() -> MongoClient:
+    global _mongo_client
+    if _mongo_client is None:
+        _mongo_client = MongoClient(
+            os.getenv("MONGODB_URI"),
+            serverSelectionTimeoutMS=5000,
+            connectTimeoutMS=5000,
+            socketTimeoutMS=5000,
+        )
+    return _mongo_client
+
 def get_col():
-    client = MongoClient(os.getenv("MONGODB_URI"))
-    return client["vhabot"]["sprachen"]
+    return _get_client()["vhabot"]["sprachen"]
 
 
 def get_active_langs() -> set:
@@ -45,7 +61,6 @@ def get_active_langs() -> set:
         col = get_col()
         doc = col.find_one({"_id": "settings"})
         if not doc:
-            # Kein Eintrag → Standardwerte in MongoDB schreiben
             default = {"DE", "FR", "PT"}
             col.update_one(
                 {"_id": "settings"},
@@ -54,7 +69,6 @@ def get_active_langs() -> set:
             )
             return default
         active = set(doc.get("active", ["DE", "FR", "PT"]))
-        # DE und FR immer erzwingen
         active.update(FIXED_LANGS)
         return active
     except Exception as e:
@@ -66,7 +80,7 @@ def set_active_langs(langs: set):
     """Speichert die aktiven Sprachen in MongoDB."""
     try:
         col = get_col()
-        langs.update(FIXED_LANGS)  # DE + FR immer drin
+        langs.update(FIXED_LANGS)
         col.update_one(
             {"_id": "settings"},
             {"$set": {"active": list(langs)}},
@@ -119,25 +133,20 @@ class SprachenView(discord.ui.View):
                 )
                 return
 
-            # Direkt aus MongoDB lesen
+            # Alles in einem einzigen DB-Zugriff: lesen + schreiben
             try:
                 col = get_col()
                 doc = col.find_one({"_id": "settings"})
                 active = set(doc.get("active", ["DE", "FR", "PT"])) if doc else {"DE", "FR", "PT"}
-                active.update(FIXED_LANGS)  # DE + FR immer drin
-            except Exception:
-                active = {"DE", "FR", "PT"}
+                active.update(FIXED_LANGS)
 
-            if code in active:
-                active.discard(code)
-                action = "deaktiviert / désactivé / desativado"
-            else:
-                active.add(code)
-                action = "aktiviert / activé / ativado"
+                if code in active:
+                    active.discard(code)
+                    action = "deaktiviert / désactivé / desativado"
+                else:
+                    active.add(code)
+                    action = "aktiviert / activé / ativado"
 
-            # Direkt in MongoDB schreiben
-            try:
-                col = get_col()
                 col.update_one(
                     {"_id": "settings"},
                     {"$set": {"active": list(active)}},
