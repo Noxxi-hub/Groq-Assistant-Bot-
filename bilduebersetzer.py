@@ -219,7 +219,16 @@ class BildUebersetzerCog(commands.Cog):
                 )
                 embed = discord.Embed(title=title, color=0x9B59B6)
 
-                # Immer alle 4 Sprachen hartcodiert
+                # Original-Text immer zuerst anzeigen
+                original_text = clean_text(result.get("original", ""))
+                if original_text:
+                    embed.add_field(
+                        name=f"📜 Original ({lang})",
+                        value=original_text[:1000],
+                        inline=False
+                    )
+
+                # Immer alle 4 Sprachen hartcodiert – unabhängig von sprachen.py
                 lang_map = [
                     ("DE", "🇩🇪 Deutsch",     result.get("de", "")),
                     ("FR", "🇫🇷 Français",    result.get("fr", "")),
@@ -229,23 +238,6 @@ class BildUebersetzerCog(commands.Cog):
 
                 for code, label, text in lang_map:
                     cleaned = clean_text(text)
-
-                    if cleaned:
-                        # Namen fett machen – egal ob mit oder ohne @
-                        # Erkennt Namen am Anfang der Zeile oder nach Leerzeichen
-                        import re
-                        # Fall 1: mit @   → **@Name:**
-                        cleaned = re.sub(r'@(\S+)', r'**\1:** ', cleaned)
-                        # Fall 2: ohne @ (normaler Spielername am Zeilenanfang oder nach Leerzeichen)
-                        cleaned = re.sub(r'(^|\n|\s)([A-Za-z0-9_]{3,20})(?=\s|:)', r'\1**\2:** ', cleaned)
-
-                        # Doppelte Doppelpunkte bereinigen
-                        cleaned = cleaned.replace(":**:**", ":**")
-                        cleaned = cleaned.replace(":** :", ":** ")
-
-                        # \n sauber machen
-                        cleaned = cleaned.replace("\\n", "\n").strip()
-
                     if cleaned:
                         embed.add_field(name=label, value=cleaned[:1000], inline=False)
                     else:
