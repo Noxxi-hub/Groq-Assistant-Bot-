@@ -219,15 +219,6 @@ class BildUebersetzerCog(commands.Cog):
                 )
                 embed = discord.Embed(title=title, color=0x9B59B6)
 
-                # Original-Text immer zuerst anzeigen
-                original_text = clean_text(result.get("original", ""))
-                if original_text:
-                    embed.add_field(
-                        name=f"📜 Original ({lang})",
-                        value=original_text[:1000],
-                        inline=False
-                    )
-
                 # Immer alle 4 Sprachen hartcodiert – unabhängig von sprachen.py
                 lang_map = [
                     ("DE", "🇩🇪 Deutsch",     result.get("de", "")),
@@ -238,6 +229,22 @@ class BildUebersetzerCog(commands.Cog):
 
                 for code, label, text in lang_map:
                     cleaned = clean_text(text)
+
+                    # Namen verbessern: @Noxxi → **@Noxxi:** mit Leerzeichen
+                    if cleaned:
+                        # @Noxxi1 → @Noxxi:   und @NOXX1 → @NOXX1:
+                        cleaned = cleaned.replace("@NOXX1", "@NOXX1: ")
+                        cleaned = cleaned.replace("@Noxxi1", "@Noxxi: ")
+                        cleaned = cleaned.replace("@Noxxi", "**@Noxxi:** ")
+                        cleaned = cleaned.replace("@Tyooky", "**@Tyooky:** ")
+
+                        # Allgemein: @Name → **@Name:** 
+                        import re
+                        cleaned = re.sub(r'@(\w+)', r'**\1:** ', cleaned)
+
+                        # Entferne überflüssige \n am Ende von Zeilen
+                        cleaned = cleaned.replace("\\n", "\n").strip()
+
                     if cleaned:
                         embed.add_field(name=label, value=cleaned[:1000], inline=False)
                     else:
