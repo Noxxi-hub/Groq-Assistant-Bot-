@@ -93,30 +93,52 @@ async def extract_and_translate(groq_call_fn, image_b64: str, content_type: str)
 
     try:
         clean = result_str.strip()
-        if clean.startswith("```"):
-            clean = clean.split("```")[1]
-            if clean.startswith("json"):
-                clean = clean[4:]
+
+        # Markdown-Backticks entfernen
+        if "```" in clean:
+            parts = clean.split("```")
+            for part in parts:
+                part = part.strip()
+                if part.startswith("json"):
+                    part = part[4:].strip()
+                if part.startswith("{") or part.startswith("["):
+                    clean = part
+                    break
         clean = clean.strip()
 
-        parsed = json.loads(clean)
+        # Falls Modell ein Array zurückgibt → erstes Element nehmen
+        if clean.startswith("["):
+            arr = json.loads(clean)
+            parsed = arr[0] if (isinstance(arr, list) and arr) else None
+            if not parsed:
+                return None
+        else:
+            parsed = json.loads(clean)
 
-        # Prüfen ob kein Text erkannt
-        if all(parsed.get(k, "").upper().strip() == "NOTEXT" for k in ["de", "fr", "en", "pt"]):
+        # Kein Text erkannt
+        if all(str(parsed.get(k, "")).upper().strip() in ("NOTEXT", "", "[]", "{}") for k in ["de", "fr", "en", "pt"]):
             return None
+
+        # Sicherstellen dass alle Felder Strings sind (nicht Listen/Dicts)
+        for key in ["de", "fr", "en", "pt", "lang"]:
+            val = parsed.get(key, "")
+            if isinstance(val, list):
+                parsed[key] = "\n".join(str(v) for v in val)
+            elif not isinstance(val, str):
+                parsed[key] = str(val)
 
         return parsed
 
-    except Exception:
-        log.warning(f"JSON-Parse fehlgeschlagen: {result_str[:300]}")
+    except Exception as e:
+        log.warning(f"JSON-Parse fehlgeschlagen ({e}): {result_str[:300]}")
 
+        # Fallback: Regex-Extraktion
+        import re
         parsed = {"lang": "?", "de": "", "fr": "", "pt": "", "en": ""}
-        for line in result_str.split("\n"):
-            for key in ["lang", "de", "fr", "pt", "en"]:
-                prefix = f'"{key}":'
-                if prefix in line.lower():
-                    val = line.split(":", 1)[-1].strip().strip('",')
-                    parsed[key] = val
+        for key in ["lang", "de", "fr", "en", "pt"]:
+            m = re.search(rf'"{key}"\s*:\s*"(.*?)(?<!\\)"(?=\s*[,}}])', result_str, re.DOTALL)
+            if m:
+                parsed[key] = m.group(1).replace('\\n', '\n').replace('\\"', '"')
         return parsed if any(parsed.get(k) for k in ["de", "fr", "en", "pt"]) else None
 
 
