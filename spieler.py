@@ -85,8 +85,8 @@ class SpielerDeleteView(discord.ui.View):
         self.author = author
         self.data = data          # Alle Spieler
         self.page = page
-        self.per_page = 20        # Max 20 Delete-Buttons pro Seite
-        self._build_buttons()
+        self.per_page = 16        # Max 16 Delete-Buttons pro Seite (4 Zeilen à 4)
+        self._build_buttons()     # Zeile 4 bleibt für Navigation frei
 
     def _build_buttons(self):
         self.clear_items()
@@ -94,14 +94,14 @@ class SpielerDeleteView(discord.ui.View):
         end = start + self.per_page
         page_data = self.data[start:end]
 
-        # Delete-Button pro Spieler (max 20, je 2 pro Zeile → 10 Zeilen aber Discord max 5 Zeilen = 25 Buttons)
-        # Wir nehmen max 20 Spieler pro Seite, 4 pro Zeile → 5 Zeilen
+        # 4 Buttons pro Zeile, Zeilen 0-3 → max 16 Buttons
+        # Zeile 4 ist reserviert für Navigations-Buttons
         for i, spieler in enumerate(page_data):
             btn = discord.ui.Button(
                 label=f"🗑️ {spieler['name']}",
                 style=discord.ButtonStyle.danger,
                 custom_id=f"del_{spieler['name']}",
-                row=i // 4
+                row=i // 4  # 0-3
             )
             btn.callback = self._make_delete_callback(spieler["name"])
             self.add_item(btn)
