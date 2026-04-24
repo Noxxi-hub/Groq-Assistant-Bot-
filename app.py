@@ -563,11 +563,21 @@ async def cmd_help(ctx):
     )
 
     embed.add_field(
-        name="🏗️ Server-Struktur  🔐 R5",
+        name="🏗️ Server-Struktur  🔐 Bot DEV",
         value=(
             "`!server export` – Aktuelle Struktur in MongoDB speichern\n"
             "`!server preview` – Gespeicherte Struktur anzeigen\n"
             "`!server import` – Struktur auf neuem Server erstellen"
+        ),
+        inline=False
+    )
+
+    embed.add_field(
+        name="🗑️ Kanal leeren  🔐 Bot DEV",
+        value=(
+            "`!clean` – Alle Nachrichten im aktuellen Kanal löschen (mit Bestätigung)\n"
+            "`!clean 50` – Bestimmte Anzahl Nachrichten löschen (1–1000)\n"
+            "⚠️ Nur Nachrichten jünger als 14 Tage können gelöscht werden"
         ),
         inline=False
     )
@@ -734,6 +744,99 @@ async def cmd_kanalid(ctx):
         await ctx.author.send(embed=embed)
 
     await ctx.send("📬 Ich habe dir die Kanal-IDs als Direktnachricht geschickt!", delete_after=8)
+
+
+# ────────────────────────────────────────────────
+# KANAL LEEREN
+# ────────────────────────────────────────────────
+
+NOXXI_ID = 1464651603654086748
+
+@bot.command(name="clean", aliases=["clear", "purge", "löschen"])
+async def cmd_clean(ctx, menge: int = None):
+    """Löscht Nachrichten im aktuellen Kanal. Nur für NOXXI."""
+
+    if ctx.author.id != NOXXI_ID:
+        await ctx.send("❌ Dieser Befehl ist nur für ausgewählte Personen.", delete_after=5)
+        return
+
+    # Befehlsnachricht sofort löschen
+    try:
+        await ctx.message.delete()
+    except Exception:
+        pass
+
+    # Ohne Zahl → alles löschen (in Blöcken, Discord-Limit: 100 pro Request)
+    if menge is None:
+        confirm_msg = await ctx.send(
+            "⚠️ **Alle Nachrichten löschen?**\n"
+            "Reagiere mit ✅ zum Bestätigen oder ❌ zum Abbrechen.\n"
+            "*(Nur Nachrichten jünger als 14 Tage können gelöscht werden)*",
+        )
+        await confirm_msg.add_reaction("✅")
+        await confirm_msg.add_reaction("❌")
+
+        def check(reaction, user):
+            return (
+                user == ctx.author
+                and str(reaction.emoji) in ["✅", "❌"]
+                and reaction.message.id == confirm_msg.id
+            )
+
+        import asyncio as _asyncio
+        try:
+            reaction, _ = await bot.wait_for("reaction_add", timeout=30.0, check=check)
+        except _asyncio.TimeoutError:
+            await confirm_msg.edit(content="⏰ Timeout — Abgebrochen.", delete_after=5)
+            return
+
+        if str(reaction.emoji) == "❌":
+            await confirm_msg.edit(content="❌ Abgebrochen.", delete_after=5)
+            return
+
+        await confirm_msg.delete()
+        status = await ctx.send("🗑️ Lösche alle Nachrichten...")
+
+        deleted_total = 0
+        while True:
+            deleted = await ctx.channel.purge(limit=100, before=status)
+            deleted_total += len(deleted)
+            if len(deleted) < 100:
+                break
+
+        await status.edit(
+            content=f"✅ **{deleted_total} Nachrichten gelöscht.**\n"
+                    f"*(Diese Meldung verschwindet in 8 Sekunden)*"
+        )
+        await _asyncio.sleep(8)
+        try:
+            await status.delete()
+        except Exception:
+            pass
+
+    else:
+        # Bestimmte Anzahl löschen
+        if menge < 1 or menge > 1000:
+            await ctx.send("❌ Bitte eine Zahl zwischen 1 und 1000 angeben.", delete_after=6)
+            return
+
+        import asyncio as _asyncio
+        deleted = await ctx.channel.purge(limit=menge)
+        status = await ctx.send(
+            f"✅ **{len(deleted)} Nachrichten gelöscht.**\n"
+            f"*(Diese Meldung verschwindet in 6 Sekunden)*"
+        )
+        await _asyncio.sleep(6)
+        try:
+            await status.delete()
+        except Exception:
+            pass
+
+
+@cmd_clean.error
+async def clean_error(ctx, error):
+    if isinstance(error, commands.BadArgument):
+        await ctx.send("❌ Ungültige Zahl. Beispiel: `!clean 50`", delete_after=6)
 
 
 # ────────────────────────────────────────────────

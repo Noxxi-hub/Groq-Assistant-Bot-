@@ -16,7 +16,7 @@ import base64
 
 log = logging.getLogger("VHABot.Server")
 
-ALLOWED_ROLES = {"R5", "DEV"}
+NOXXI_ID = 1464651603654086748
 
 LOGO_URL = (
     "https://cdn.discordapp.com/attachments/1484252260614537247/"
@@ -34,10 +34,7 @@ def get_col():
 
 
 def has_permission(member: discord.Member) -> bool:
-    if member.guild_permissions.administrator:
-        return True
-    member_roles = {r.name.upper() for r in member.roles}
-    return bool(member_roles & ALLOWED_ROLES)
+    return member.id == NOXXI_ID
 
 
 def channel_type_str(ch) -> str:
