@@ -250,8 +250,9 @@ async def translate_all(text: str, target_langs: list) -> dict:
     if not target_langs:
         return {}
 
-    codes_str = ", ".join(f"{code}={lang_name}" for code, lang_name, _ in target_langs)
-    format_str = "\n".join(f"{code}: ..." for code, _, _ in target_langs)
+    codes_str  = ", ".join(f"{code}={lang_name}" for code, lang_name, _ in target_langs)
+    codes      = [code for code, _, _ in target_langs]
+    json_keys  = ", ".join(f'"{code}": "..."' for code in codes)
 
     # Token-Limit dynamisch: ~1.5 Tokens/Zeichen x Anzahl Sprachen, mind. 1500, max. 6000
     estimated = max(1500, min(6000, int(len(text) * 1.5 * len(target_langs))))
@@ -274,31 +275,29 @@ async def translate_all(text: str, target_langs: list) -> dict:
                         f"- Keep game-specific terms, names, coordinates, and numbers as-is\n"
                         f"- If a word is unclear, choose the most natural game-chat interpretation\n"
                         f"- Do NOT add explanations, notes, or markdown\n"
-                        f"- Reply ONLY in this exact format, nothing else:\n"
-                        f"{format_str}"
+                        f"- Reply ONLY with a valid JSON object, no extra text before or after:\n"
+                        f"{{{json_keys}}}"
                     )
                 },
                 {"role": "user", "content": text}
             ]
         )
 
-        # Codes als geordnete Liste für Bereichs-Extraktion (mehrzeilig)
-        codes = [code for code, _, _ in target_langs]
-        translations = {}
-        for i, code in enumerate(codes):
-            if i + 1 < len(codes):
-                next_code = codes[i + 1]
-                m = re.search(
-                    rf"^{code}:\s*(.+?)(?=^{next_code}:)",
-                    result, re.MULTILINE | re.DOTALL
-                )
-            else:
-                m = re.search(rf"^{code}:\s*(.+)", result, re.MULTILINE | re.DOTALL)
+        # JSON parsen — robuster als Regex, löst das Chinesisch-Komma-Problem
+        import json as _json
+        clean = result.strip()
+        if clean.startswith("```"):
+            clean = clean.split("```")[1]
+            if clean.startswith("json"):
+                clean = clean[4:]
+        clean = clean.strip()
 
-            if m:
-                translation = m.group(1).strip()
-                if translation and translation.lower() != text.lower():
-                    translations[code] = translation
+        parsed = _json.loads(clean)
+        translations = {}
+        for code in codes:
+            val = parsed.get(code, "").strip()
+            if val and val.lower() != text.lower():
+                translations[code] = val
         return translations
 
     except Exception as e:
