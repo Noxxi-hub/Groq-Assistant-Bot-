@@ -18,8 +18,8 @@ import asyncio
 
 log = logging.getLogger("VHABot.Event")
 
-VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
-GROQ_MODEL = "llama-3.3-70b-versatile"
+VISION_MODEL = "gemini-2.5-flash-lite-preview-06-17"
+GEMINI_MODEL = "gemini-2.5-flash-lite-preview-06-17"
 
 LOGO_URL = (
     "https://cdn.discordapp.com/attachments/1484252260614537247/"
@@ -73,8 +73,8 @@ async def image_to_base64(url: str) -> tuple:
             return b64, content_type
 
 
-async def analyze_event_image(groq_call_fn, image_b64: str, content_type: str) -> dict:
-    result_str = await groq_call_fn(
+async def analyze_event_image(gemini_call_fn, image_b64: str, content_type: str) -> dict:
+    result_str = await gemini_call_fn(
         model=VISION_MODEL,
         temperature=0.0,
         max_tokens=300,
@@ -148,12 +148,12 @@ def get_warning_seconds(total_seconds: int) -> int:
 # ────────────────────────────────────────────────
 
 class EventLangView(discord.ui.View):
-    def __init__(self, bot, groq_call_fn, event_name: str, seconds: int,
+    def __init__(self, bot, gemini_call_fn, event_name: str, seconds: int,
                  display_time: str, author: discord.Member,
                  names: dict, selected_langs: set):
         super().__init__(timeout=120)
         self.bot = bot
-        self.groq_call = groq_call_fn
+        self.gemini_call = gemini_call_fn
         self.event_name = event_name
         self.seconds = seconds
         self.display_time = display_time
@@ -224,8 +224,8 @@ class EventLangView(discord.ui.View):
         if missing:
             tasks = []
             for code in missing:
-                tasks.append(self.groq_call(
-                    model=GROQ_MODEL,
+                tasks.append(self.gemini_call(
+                    model=GEMINI_MODEL,
                     temperature=0.1,
                     max_tokens=50,
                     messages=[
@@ -290,9 +290,9 @@ class EventLangView(discord.ui.View):
 # ────────────────────────────────────────────────
 
 class EventCog(commands.Cog):
-    def __init__(self, bot, groq_call_fn):
+    def __init__(self, bot, gemini_call_fn):
         self.bot = bot
-        self.groq_call = groq_call_fn
+        self.gemini_call = gemini_call_fn
 
     @commands.command(name="event", aliases=["evenement", "evento", "ev"])
     async def cmd_event(self, ctx):
@@ -326,7 +326,7 @@ class EventCog(commands.Cog):
                 await thinking.edit(content="❌ Bild konnte nicht geladen werden.")
                 return
 
-            result = await analyze_event_image(self.groq_call, image_b64, content_type)
+            result = await analyze_event_image(self.gemini_call, image_b64, content_type)
 
             if not result.get("found"):
                 await thinking.edit(content="❓ Kein Event erkannt im Bild.")
@@ -340,13 +340,13 @@ class EventCog(commands.Cog):
             thinking_msg = await thinking.edit(content="🔄 **Übersetze Event-Namen...**")
 
             name_fr, name_pt = await asyncio.gather(
-                self.groq_call(
-                    model=GROQ_MODEL, temperature=0.1, max_tokens=50,
+                self.gemini_call(
+                    model=GEMINI_MODEL, temperature=0.1, max_tokens=50,
                     messages=[{"role": "system", "content": "Translate this game event name to French. Output ONLY the translation."},
                                {"role": "user", "content": event_name}]
                 ),
-                self.groq_call(
-                    model=GROQ_MODEL, temperature=0.1, max_tokens=50,
+                self.gemini_call(
+                    model=GEMINI_MODEL, temperature=0.1, max_tokens=50,
                     messages=[{"role": "system", "content": "Translate this game event name to Brazilian Portuguese. Output ONLY the translation."},
                                {"role": "user", "content": event_name}]
                 )
@@ -376,7 +376,7 @@ class EventCog(commands.Cog):
             embed.set_footer(text="Wähle Sprachen für die Erinnerung und setze den Timer!")
 
             view = EventLangView(
-                self.bot, self.groq_call,
+                self.bot, self.gemini_call,
                 event_name, seconds, display_time,
                 ctx.author, names, active_langs
             )
@@ -387,5 +387,5 @@ class EventCog(commands.Cog):
             await thinking.edit(content="⚠️ Fehler beim Analysieren des Bildes.")
 
 
-async def setup(bot, groq_call_fn):
-    await bot.add_cog(EventCog(bot, groq_call_fn))
+async def setup(bot, gemini_call_fn):
+    await bot.add_cog(EventCog(bot, gemini_call_fn))

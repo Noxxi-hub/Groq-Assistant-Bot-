@@ -15,7 +15,7 @@ import time
 
 log = logging.getLogger("VHABot.Bild")
 
-VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
+VISION_MODEL = "gemini-2.5-flash-lite-preview-06-17"
 
 IMAGE_COOLDOWN = 15.0
 user_last_image: dict[int, float] = {}
@@ -32,7 +32,7 @@ async def image_to_base64(url: str) -> tuple:
             return b64, content_type
 
 
-async def extract_and_translate(groq_call_fn, image_b64: str, content_type: str) -> dict | None:
+async def extract_and_translate(gemini_call_fn, image_b64: str, content_type: str) -> dict | None:
     """
     Liest Text aus dem Bild und übersetzt ihn.
     Speziell optimiert für:
@@ -41,7 +41,7 @@ async def extract_and_translate(groq_call_fn, image_b64: str, content_type: str)
     - Alliance Info / Events / Profile
     """
 
-    result_str = await groq_call_fn(
+    result_str = await gemini_call_fn(
         model=VISION_MODEL,
         temperature=0.1,
         max_tokens=1800,
@@ -193,10 +193,9 @@ LOGO_URL = (
 
 
 class BildUebersetzerCog(commands.Cog):
-    def __init__(self, bot, groq_client, groq_call_fn):
+    def __init__(self, bot, gemini_call_fn):
         self.bot = bot
-        self.groq_client = groq_client
-        self.groq_call = groq_call_fn
+        self.gemini_call = gemini_call_fn
 
     @commands.command(name="übersetze", aliases=["uebersetze", "traduire", "traduzir", "ocr", "lese", "lire"])
     async def uebersetze_bild(self, ctx):
@@ -261,7 +260,7 @@ class BildUebersetzerCog(commands.Cog):
                 if not image_b64:
                     return None
 
-                result = await extract_and_translate(self.groq_call, image_b64, content_type)
+                result = await extract_and_translate(self.gemini_call, image_b64, content_type)
                 if not result:
                     return None
 
@@ -334,5 +333,5 @@ class BildUebersetzerCog(commands.Cog):
             await thinking.edit(content=None, embed=embed)
 
 
-async def setup(bot, groq_client, groq_call_fn):
-    await bot.add_cog(BildUebersetzerCog(bot, groq_client, groq_call_fn))
+async def setup(bot, gemini_call_fn):
+    await bot.add_cog(BildUebersetzerCog(bot, gemini_call_fn))

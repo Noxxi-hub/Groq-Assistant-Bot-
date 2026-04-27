@@ -9,7 +9,8 @@ import logging
 from collections import deque
 from datetime import datetime, timezone
 from flask import Flask
-from groq import Groq
+from google import genai
+from google.genai import types
 
 # ────────────────────────────────────────────────
 # LOGGING
@@ -18,7 +19,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[
-        logging.FileHandler("groq_usage.log", encoding="utf-8"),
+        logging.FileHandler("gemini_usage.log", encoding="utf-8"),
         logging.StreamHandler()
     ]
 )
@@ -34,7 +35,7 @@ LOGO_URL = (
     "?ex=69bd8dd7&is=69bc3c57&hm=de6fea399dd30f97d2a14e1515c9e7f91d81d0d9ea111f13e0757d42eb12a0e5&"
 )
 
-GROQ_MODEL       = "llama-3.3-70b-versatile"
+GEMINI_MODEL     = "gemini-2.5-flash-lite-preview-06-17"
 BOT_LOG_CHANNEL_ID = 1484252260614537247
 
 # ────────────────────────────────────────────────
@@ -48,13 +49,13 @@ processed_messages_set = set()
 
 translate_active = True
 
-groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+gemini_client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
-# Semaphore: max. 2 gleichzeitige Groq-Calls
-groq_semaphore = asyncio.Semaphore(2)
+# Semaphore: max. 4 gleichzeitige Gemini-Calls
+gemini_semaphore = asyncio.Semaphore(4)
 
-# Globale Rate-Limit-Pause (wird gesetzt wenn Groq 429 meldet)
-_groq_rate_limit_until: float = 0.0
+# Globale Rate-Limit-Pause
+_gemini_rate_limit_until: float = 0.0
 
 user_last_translation: dict[int, float] = {}
 TRANSLATION_COOLDOWN = 8.0
@@ -78,68 +79,103 @@ def ping():
 
 
 # ────────────────────────────────────────────────
-# GROQ ASYNC WRAPPER mit Retry
+# GEMINI ASYNC WRAPPER mit Retry
 # ────────────────────────────────────────────────
 
-async def groq_call(model: str, messages: list, temperature: float = 0.15,
-                    max_tokens: int = 500, retries: int = 3) -> str:
+async def gemini_call(model: str, messages: list, temperature: float = 0.1,
+                      max_tokens: int = 500, retries: int = 3) -> str:
     """
-    Fuehrt einen Groq-API-Call asynchron aus.
-    - Semaphore: max. 2 gleichzeitige Calls
-    - Globale Rate-Limit-Pause: alle Calls warten wenn 429 kam
-    - Automatischer Retry mit Backoff
-    - Loggt Token-Verbrauch
+    Führt einen Gemini-API-Call asynchron aus.
+    messages: OpenAI-kompatibles Format [{"role": "system"/"user", "content": "..."}]
+    Unterstützt auch Vision: content kann eine Liste mit image_url sein.
     """
-    global _groq_rate_limit_until
+    global _gemini_rate_limit_until
     loop = asyncio.get_event_loop()
     wait = 4
 
+    # System-Prompt und User-Messages trennen
+    system_text = None
+    contents = []
+    for msg in messages:
+        role = msg["role"]
+        content = msg["content"]
+        if role == "system":
+            system_text = content
+        elif role == "user":
+            if isinstance(content, str):
+                contents.append(types.Content(
+                    role="user",
+                    parts=[types.Part(text=content)]
+                ))
+            elif isinstance(content, list):
+                # Vision: Liste mit text und image_url parts
+                parts = []
+                for item in content:
+                    if item.get("type") == "text":
+                        parts.append(types.Part(text=item["text"]))
+                    elif item.get("type") == "image_url":
+                        url = item["image_url"]["url"]
+                        if url.startswith("data:"):
+                            # base64 inline image
+                            header, b64data = url.split(",", 1)
+                            mime = header.split(":")[1].split(";")[0]
+                            import base64 as _b64
+                            raw = _b64.b64decode(b64data)
+                            parts.append(types.Part(
+                                inline_data=types.Blob(mime_type=mime, data=raw)
+                            ))
+                        else:
+                            parts.append(types.Part(text=f"[Image URL: {url}]"))
+                contents.append(types.Content(role="user", parts=parts))
+
+    config = types.GenerateContentConfig(
+        temperature=temperature,
+        max_output_tokens=max_tokens,
+        system_instruction=system_text,
+    )
+
     for attempt in range(retries):
-        # Globale Pause abwarten (alle Calls gleichzeitig pausiert)
         now = asyncio.get_event_loop().time()
-        pause = _groq_rate_limit_until - now
+        pause = _gemini_rate_limit_until - now
         if pause > 0:
             log.info(f"Rate-Limit-Pause: warte {pause:.1f}s")
             await asyncio.sleep(pause)
 
-        async with groq_semaphore:
+        async with gemini_semaphore:
             try:
                 resp = await loop.run_in_executor(
                     None,
-                    lambda: groq_client.chat.completions.create(
+                    lambda: gemini_client.models.generate_content(
                         model=model,
-                        temperature=temperature,
-                        max_tokens=max_tokens,
-                        messages=messages
+                        contents=contents,
+                        config=config,
                     )
                 )
-                if resp.usage:
-                    token_counter["prompt"]     += resp.usage.prompt_tokens
-                    token_counter["completion"] += resp.usage.completion_tokens
-                    token_counter["total"]      += resp.usage.total_tokens
-                    log.info(
-                        f"Tokens: +{resp.usage.total_tokens} "
-                        f"(heute gesamt: {token_counter['total']})"
-                    )
-                return resp.choices[0].message.content.strip()
+                if resp.usage_metadata:
+                    total = (resp.usage_metadata.prompt_token_count or 0) + \
+                            (resp.usage_metadata.candidates_token_count or 0)
+                    token_counter["prompt"]     += resp.usage_metadata.prompt_token_count or 0
+                    token_counter["completion"] += resp.usage_metadata.candidates_token_count or 0
+                    token_counter["total"]      += total
+                    log.info(f"Tokens: +{total} (heute gesamt: {token_counter['total']})")
+                return resp.text.strip()
 
             except Exception as e:
                 err = str(e)
-                if "429" in err or "rate" in err.lower():
-                    # Globale Pause setzen — alle weiteren Calls warten automatisch
-                    _groq_rate_limit_until = asyncio.get_event_loop().time() + wait
+                if "429" in err or "quota" in err.lower() or "rate" in err.lower():
+                    _gemini_rate_limit_until = asyncio.get_event_loop().time() + wait
                     log.warning(f"Rate-Limit (Versuch {attempt+1}/{retries}) – globale Pause {wait}s")
                     await asyncio.sleep(wait)
-                    wait = min(wait * 2, 60)  # max. 60s
-                elif "5" in err[:3]:
+                    wait = min(wait * 2, 60)
+                elif "5" in err[:3] or "server" in err.lower():
                     log.warning(f"Server-Fehler (Versuch {attempt+1}/{retries}) – warte {wait}s")
                     await asyncio.sleep(wait)
                     wait *= 2
                 else:
-                    log.error(f"Groq-Fehler: {e}")
+                    log.error(f"Gemini-Fehler: {e}")
                     raise
 
-    raise Exception("Groq nicht erreichbar nach mehreren Versuchen")
+    raise Exception("Gemini nicht erreichbar nach mehreren Versuchen")
 
 
 # ────────────────────────────────────────────────
@@ -198,8 +234,8 @@ async def detect_language_llm(text: str) -> str:
 
     # Nur jetzt: LLM-Call (nur für lateinische Schrift nötig)
     try:
-        result = await groq_call(
-            model=GROQ_MODEL,
+        result = await gemini_call(
+            model=GEMINI_MODEL,
             temperature=0.0,
             max_tokens=5,
             messages=[
@@ -243,7 +279,7 @@ async def detect_language_llm(text: str) -> str:
 async def translate_all(text: str, target_langs: list) -> dict:
     """
     Übersetzt text in ALLE Zielsprachen in einem einzigen API-Call.
-    Spart bis zu 80% der Groq-Requests.
+    Spart bis zu 80% der API-Requests.
     target_langs: list of (code, lang_name, label) tuples
     Gibt dict zurück: {code: übersetzter_text}
     """
@@ -258,8 +294,8 @@ async def translate_all(text: str, target_langs: list) -> dict:
     estimated = max(1500, min(6000, int(len(text) * 1.5 * len(target_langs))))
 
     try:
-        result = await groq_call(
-            model=GROQ_MODEL,
+        result = await gemini_call(
+            model=GEMINI_MODEL,
             temperature=0.1,
             max_tokens=estimated,
             messages=[
@@ -308,8 +344,8 @@ async def translate_all(text: str, target_langs: list) -> dict:
 async def translate_text(text: str, target_lang_name: str) -> str:
     """Einzelübersetzung — nur noch für Reply-Gast-Sprachen verwendet."""
     try:
-        return await groq_call(
-            model=GROQ_MODEL,
+        return await gemini_call(
+            model=GEMINI_MODEL,
             temperature=0.1,
             max_tokens=600,
             messages=[
@@ -415,7 +451,7 @@ async def on_ready():
 
     try:
         from bilduebersetzer import setup as setup_bild
-        await setup_bild(bot, groq_client, groq_call)
+        await setup_bild(bot, gemini_call)
     except Exception as e:
         errors.append(f"❌ bilduebersetzer: {e}")
 
@@ -426,7 +462,7 @@ async def on_ready():
 
     try:
         from event import setup as setup_event
-        await setup_event(bot, groq_call)
+        await setup_event(bot, gemini_call)
     except Exception as e:
         errors.append(f"❌ event: {e}")
 
@@ -666,8 +702,8 @@ async def cmd_ai(ctx, *, question: str = None):
     footer = f"Antwort in {lang}"
 
     try:
-        answer = await groq_call(
-            model=GROQ_MODEL,
+        answer = await gemini_call(
+            model=GEMINI_MODEL,
             temperature=0.7,
             max_tokens=1000,
             messages=[
@@ -691,7 +727,7 @@ async def cmd_ai(ctx, *, question: str = None):
     embed = discord.Embed(title=f"VHA KI • Antwort {flag}", description=answer, color=color)
     embed.set_author(name="VHA ALLIANCE", icon_url=LOGO_URL)
     embed.add_field(name="→ Deine Frage", value=question[:900], inline=False)
-    embed.set_footer(text=f"VHA • Groq • {GROQ_MODEL} • {footer}", icon_url=LOGO_URL)
+    embed.set_footer(text=f"VHA • Gemini • {GEMINI_MODEL} • {footer}", icon_url=LOGO_URL)
     await thinking.edit(embed=embed)
 
 
