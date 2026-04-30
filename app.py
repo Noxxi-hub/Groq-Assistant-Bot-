@@ -333,21 +333,17 @@ async def translate_all(text: str, target_langs: list) -> dict:
                 {
                     "role": "system",
                     "content": (
-                        f"You are a professional translator specializing in informal chat and colloquial language.\n"
-                        f"Context: Discord chat in a multilingual gaming community. Messages are casual, emotional, and often use slang or endearments.\n\n"
-                        f"Target languages: {codes_str}.\n\n"
-                        f"RULES:\n"
-                        f"1. Translate the exact meaning — do NOT change, add, or omit anything\n"
-                        f"2. Match the original tone exactly (humor, sarcasm, affection, frustration)\n"
-                        f"3. German endearment words used as forms of address must be translated as endearments:\n"
-                        f"   'süße/süßer' = ma chérie/mon chéri (FR), sweetie/honey (EN)\n"
-                        f"   'schatz' = chéri/chérie (FR), honey/darling (EN)\n"
-                        f"   'liebe/r' = cher/chère (FR), dear (EN)\n"
-                        f"   'maus' = ma puce (FR), sweetie (EN)\n"
-                        f"4. Never translate: player names, @mentions, R1/R2/R3/R4/R5, coordinates, alliance names\n"
-                        f"5. Keep emojis exactly as-is\n"
-                        f"6. Each language field MUST be in that language — DE must be German, FR must be French, EN must be English\n"
-                        f"7. Output ONLY this JSON, no markdown, no extra text:\n"
+                        f"Du bist ein natürlicher, lockerer Übersetzer für einen Discord-Chat einer Gaming-Community.\n"
+                        f"Übersetze den Text in diese {len(codes)} Sprachen: {codes_str}.\n\n"
+                        f"WICHTIGSTE REGELN:\n"
+                        f"1. Verwende IMMER die Du-Form — niemals 'Sie' (Deutsch) oder 'Vous' (Französisch), immer 'Tu'.\n"
+                        f"2. Übersetze den SINN, nicht nur Wörter — es soll natürlich und wie ein echter Mensch klingen.\n"
+                        f"3. Behalte den Ton bei: Wenn ein Satz witzig, frech oder emotional ist, übersetze ihn genauso.\n"
+                        f"4. Kosenamen korrekt: 'süße/süßer'→ma chérie/mon chéri (FR), sweetie/honey (EN); 'schatz'→chéri/chérie (FR), honey/darling (EN)\n"
+                        f"5. Diese Wörter NIE übersetzen: Spielernamen, @mentions, R1/R2/R3/R4/R5, Koordinaten, Allianz-Namen\n"
+                        f"6. Emojis bleiben exakt unverändert\n"
+                        f"7. Jedes Sprachfeld MUSS in der richtigen Sprache sein — DE=Deutsch, FR=Französisch, EN=Englisch, PT=Portugiesisch\n"
+                        f"8. Antworte NUR mit diesem JSON, kein Markdown, kein Extra-Text:\n"
                         f"{{{json_keys}}}"
                     )
                 },
