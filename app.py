@@ -379,12 +379,13 @@ async def translate_all(text: str, target_langs: list) -> dict:
                 log.warning(f"Übersetzung identisch mit Original ({code}) — verworfen")
                 continue
 
-            # Zu ähnlich (>70% Wortüberschneidung) — nur bei längeren Nachrichten prüfen
-            if len(original_words) >= 4:
+            # Zu ähnlich zum Original — nur bei 5+ Wörtern und nicht für EN
+            # EN-Nachrichten enthalten oft englische Wörter aus dem Original (Namen, Begriffe)
+            if code != "EN" and len(original_words) >= 5:
                 val_words = set(re.sub(r'[^\w\s]', '', val.lower()).split())
                 if len(original_words) > 0:
                     overlap = len(original_words & val_words) / len(original_words)
-                    if overlap > 0.70:
+                    if overlap > 0.80:
                         log.warning(f"Übersetzung zu ähnlich ({code}): {overlap:.0%} — verworfen")
                         continue
 
