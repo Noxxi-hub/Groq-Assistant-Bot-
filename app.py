@@ -343,7 +343,8 @@ async def translate_all(text: str, target_langs: list) -> dict:
                         f"5. Diese Wörter NIE übersetzen: Spielernamen, @mentions, R1/R2/R3/R4/R5, Koordinaten, Allianz-Namen\n"
                         f"6. Emojis bleiben exakt unverändert\n"
                         f"7. Jedes Sprachfeld MUSS in der richtigen Sprache sein — DE=Deutsch, FR=Französisch, EN=Englisch, PT=Portugiesisch\n"
-                        f"8. Antworte NUR mit diesem JSON, kein Markdown, kein Extra-Text:\n"
+                        f"8. WICHTIG: Alle {len(codes)} Sprachfelder MÜSSEN immer befüllt sein — auch bei sehr kurzen Sätzen oder einzelnen Wörtern\n"
+                        f"9. Antworte NUR mit diesem JSON, kein Markdown, kein Extra-Text:\n"
                         f"{{{json_keys}}}"
                     )
                 },
@@ -378,8 +379,8 @@ async def translate_all(text: str, target_langs: list) -> dict:
                 log.warning(f"Übersetzung identisch mit Original ({code}) — verworfen")
                 continue
 
-            # Zu ähnlich (>70% Wortüberschneidung)
-            if len(original_words) >= 3:
+            # Zu ähnlich (>70% Wortüberschneidung) — nur bei längeren Nachrichten prüfen
+            if len(original_words) >= 4:
                 val_words = set(re.sub(r'[^\w\s]', '', val.lower()).split())
                 if len(original_words) > 0:
                     overlap = len(original_words & val_words) / len(original_words)

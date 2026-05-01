@@ -59,29 +59,27 @@ def _make_id(channel_id: int, guild_id: int = None) -> str:
 
 def get_room_langs(channel_id: int, guild_id: int = None) -> set | None:
     """
-    Gibt die aktiven Sprachen für einen Raum zurück.
-    - None  → kein Eintrag → globale Einstellungen verwenden
-    - set() → leere Menge / disabled=True → Übersetzung deaktiviert
+    - None  → kein Eintrag ODER leere Liste → globale Einstellungen verwenden
+    - set() → explizit disabled=True → Übersetzung deaktiviert
     - set mit Codes → nur diese Sprachen übersetzen
     """
     try:
         col = get_col()
-        # Zuerst mit guild_id suchen (neues Format)
+        doc = None
         if guild_id:
             doc = col.find_one({"_id": _make_id(channel_id, guild_id)})
             if not doc:
-                # Fallback: altes Format ohne guild_id (Migration)
                 doc = col.find_one({"_id": str(channel_id)})
         else:
             doc = col.find_one({"_id": str(channel_id)})
 
         if not doc:
-            return None  # Kein Eintrag → globale Einstellungen
+            return None
         if doc.get("disabled", False):
-            return set()  # Explizit deaktiviert
+            return set()  # Explizit deaktiviert → leere Menge
         active = set(doc.get("active", []))
         if not active:
-            return set()  # Leere Liste = deaktiviert
+            return None  # Leere Liste = kein sinnvoller Override → globale Einstellungen
         return active
     except Exception as e:
         log.error(f"Fehler beim Laden der Raumsprachen: {e}")
@@ -102,8 +100,18 @@ def set_room_langs(channel_id: int, langs: set, guild_id: int = None):
 
 
 def delete_room_langs(channel_id: int, guild_id: int = None):
-    """Setzt den Raum auf 'deaktiviert' = leere Liste in MongoDB.
-    Wichtig: NICHT löschen, sonst fällt app.py auf globale Einstellungen zurück!"""
+    """Löscht den Raum-Override komplett → globale Einstellungen greifen wieder."""
+    try:
+        col = get_col()
+        col.delete_one({"_id": _make_id(channel_id, guild_id)})
+        # Auch altes Format löschen falls vorhanden
+        col.delete_one({"_id": str(channel_id)})
+    except Exception as e:
+        log.error(f"Fehler beim Löschen der Raumsprachen: {e}")
+
+
+def disable_room_langs(channel_id: int, guild_id: int = None):
+    """Setzt den Raum auf explizit deaktiviert (kein Übersetzen)."""
     try:
         col = get_col()
         col.update_one(
@@ -205,7 +213,7 @@ class RaumSprachenView(discord.ui.View):
         return callback
 
     async def _disable_callback(self, interaction: discord.Interaction):
-        """Übersetzung für diesen Raum komplett deaktivieren (in MongoDB gespeichert)."""
+        """Übersetzung für diesen Raum komplett deaktivieren."""
         if interaction.user.id != self.author.id:
             await interaction.response.send_message(
                 "❌ Nur derjenige der den Befehl ausgeführt hat kann Änderungen vornehmen.",
@@ -213,17 +221,17 @@ class RaumSprachenView(discord.ui.View):
             )
             return
 
-        delete_room_langs(self.channel_id, self.guild_id)  # Speichert disabled=True in MongoDB
+        disable_room_langs(self.channel_id, self.guild_id)
         self._update_buttons()
         embed = self._make_embed()
         await interaction.response.edit_message(embed=embed, view=self)
         await interaction.followup.send(
-            f"🚫 Übersetzung für <#{self.channel_id}> **deaktiviert** (bleibt nach Neustart deaktiviert).",
+            f"🚫 Übersetzung für <#{self.channel_id}> **deaktiviert**.",
             ephemeral=True
         )
 
     async def _global_callback(self, interaction: discord.Interaction):
-        """Raum auf globale Einstellungen zurücksetzen (Eintrag aus MongoDB löschen)."""
+        """Raum-Override löschen → globale Einstellungen greifen wieder."""
         if interaction.user.id != self.author.id:
             await interaction.response.send_message(
                 "❌ Nur derjenige der den Befehl ausgeführt hat kann Änderungen vornehmen.",
@@ -231,13 +239,7 @@ class RaumSprachenView(discord.ui.View):
             )
             return
 
-        try:
-            col = get_col()
-            col.delete_one({"_id": _make_id(self.channel_id, self.guild_id)})
-        except Exception as e:
-            await interaction.response.send_message(f"❌ Fehler: {e}", ephemeral=True)
-            return
-
+        delete_room_langs(self.channel_id, self.guild_id)
         self._update_buttons()
         embed = self._make_embed()
         await interaction.response.edit_message(embed=embed, view=self)
