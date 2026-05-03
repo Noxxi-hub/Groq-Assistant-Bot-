@@ -340,6 +340,7 @@ async def translate_all(text: str, target_langs: list) -> dict:
                         f"2. Übersetze den SINN, nicht nur Wörter — es soll natürlich und wie ein echter Mensch klingen.\n"
                         f"3. Behalte den Ton bei: Wenn ein Satz witzig, frech oder emotional ist, übersetze ihn genauso.\n"
                         f"4. Kosenamen korrekt: 'süße/süßer'→ma chérie/mon chéri (FR), sweetie/honey (EN); 'schatz'→chéri/chérie (FR), honey/darling (EN)\n"
+                        f"4b. Diese Kosenamen NIEMALS übersetzen, immer so lassen: baby, babe, bby, amor, mon amour, chéri, chérie — die werden in allen Sprachen verstanden\n"
                         f"5. Diese Wörter NIE übersetzen: Spielernamen, @mentions, R1/R2/R3/R4/R5, Koordinaten, Allianz-Namen\n"
                         f"6. Emojis bleiben exakt unverändert\n"
                         f"7. Jedes Sprachfeld MUSS in der richtigen Sprache sein — DE=Deutsch, FR=Französisch, EN=Englisch, PT=Portugiesisch\n"
@@ -684,7 +685,9 @@ async def cmd_help(ctx):
         name="🗑️ Kanal leeren  🔐 Bot DEV",
         value=(
             "`!clean` – Alle Nachrichten im aktuellen Kanal löschen (mit Bestätigung)\n"
-            "`!clean 50` – Bestimmte Anzahl Nachrichten löschen (1–1000)\n"
+            "`!clean 50` – 50 Nachrichten im aktuellen Kanal löschen\n"
+            "`!clean [Kanal-ID]` – Alle Nachrichten in einem anderen Kanal löschen\n"
+            "`!clean [Kanal-ID] 50` – 50 Nachrichten in einem anderen Kanal löschen\n"
             "⚠️ Nur Nachrichten jünger als 14 Tage können gelöscht werden"
         ),
         inline=False
@@ -861,8 +864,16 @@ async def cmd_kanalid(ctx):
 NOXXI_ID = 1464651603654086748
 
 @bot.command(name="clean", aliases=["clear", "purge", "löschen"])
-async def cmd_clean(ctx, menge: int = None):
-    """Löscht Nachrichten im aktuellen Kanal. Nur für NOXXI."""
+async def cmd_clean(ctx, *args):
+    """
+    Löscht Nachrichten. Nur für NOXXI.
+    Verwendung:
+      !clean                        → alles im aktuellen Kanal
+      !clean 50                     → 50 Nachrichten im aktuellen Kanal
+      !clean [Kanal-ID]             → alles in einem anderen Kanal
+      !clean [Kanal-ID] 50          → 50 Nachrichten in einem anderen Kanal
+    """
+    import asyncio as _asyncio
 
     if ctx.author.id != NOXXI_ID:
         await ctx.send("❌ Dieser Befehl ist nur für ausgewählte Personen.", delete_after=5)
@@ -874,10 +885,38 @@ async def cmd_clean(ctx, menge: int = None):
     except Exception:
         pass
 
-    # Ohne Zahl → alles löschen (in Blöcken, Discord-Limit: 100 pro Request)
+    # Args parsen: Kanal-ID (>100000) und/oder Menge
+    target_channel = ctx.channel
+    menge = None
+
+    for arg in args:
+        try:
+            val = int(arg)
+            if val > 100000:
+                # Kanal-ID
+                ch = ctx.guild.get_channel(val)
+                if not ch:
+                    await ctx.send(f"❌ Kanal `{val}` nicht gefunden.", delete_after=6)
+                    return
+                target_channel = ch
+            else:
+                menge = val
+        except ValueError:
+            await ctx.send(f"❌ Ungültiger Parameter: `{arg}`", delete_after=6)
+            return
+
+    # Unterschied ob aktueller oder anderer Kanal
+    remote = target_channel.id != ctx.channel.id
+    channel_mention = f"<#{target_channel.id}>" if remote else "diesem Kanal"
+
+    if menge is not None and (menge < 1 or menge > 1000):
+        await ctx.send("❌ Bitte eine Zahl zwischen 1 und 1000 angeben.", delete_after=6)
+        return
+
+    # Alles löschen → Bestätigung
     if menge is None:
         confirm_msg = await ctx.send(
-            "⚠️ **Alle Nachrichten löschen?**\n"
+            f"⚠️ **Alle Nachrichten in {channel_mention} löschen?**\n"
             "Reagiere mit ✅ zum Bestätigen oder ❌ zum Abbrechen.\n"
             "*(Nur Nachrichten jünger als 14 Tage können gelöscht werden)*",
         )
@@ -891,7 +930,6 @@ async def cmd_clean(ctx, menge: int = None):
                 and reaction.message.id == confirm_msg.id
             )
 
-        import asyncio as _asyncio
         try:
             reaction, _ = await bot.wait_for("reaction_add", timeout=30.0, check=check)
         except _asyncio.TimeoutError:
@@ -903,17 +941,17 @@ async def cmd_clean(ctx, menge: int = None):
             return
 
         await confirm_msg.delete()
-        status = await ctx.send("🗑️ Lösche alle Nachrichten...")
+        status = await ctx.send(f"🗑️ Lösche alle Nachrichten in {channel_mention}...")
 
         deleted_total = 0
         while True:
-            deleted = await ctx.channel.purge(limit=100, before=status)
+            deleted = await target_channel.purge(limit=100)
             deleted_total += len(deleted)
             if len(deleted) < 100:
                 break
 
         await status.edit(
-            content=f"✅ **{deleted_total} Nachrichten gelöscht.**\n"
+            content=f"✅ **{deleted_total} Nachrichten** in {channel_mention} **gelöscht.**\n"
                     f"*(Diese Meldung verschwindet in 8 Sekunden)*"
         )
         await _asyncio.sleep(8)
@@ -924,14 +962,9 @@ async def cmd_clean(ctx, menge: int = None):
 
     else:
         # Bestimmte Anzahl löschen
-        if menge < 1 or menge > 1000:
-            await ctx.send("❌ Bitte eine Zahl zwischen 1 und 1000 angeben.", delete_after=6)
-            return
-
-        import asyncio as _asyncio
-        deleted = await ctx.channel.purge(limit=menge)
+        deleted = await target_channel.purge(limit=menge)
         status = await ctx.send(
-            f"✅ **{len(deleted)} Nachrichten gelöscht.**\n"
+            f"✅ **{len(deleted)} Nachrichten** in {channel_mention} **gelöscht.**\n"
             f"*(Diese Meldung verschwindet in 6 Sekunden)*"
         )
         await _asyncio.sleep(6)
@@ -944,7 +977,11 @@ async def cmd_clean(ctx, menge: int = None):
 @cmd_clean.error
 async def clean_error(ctx, error):
     if isinstance(error, commands.BadArgument):
-        await ctx.send("❌ Ungültige Zahl. Beispiel: `!clean 50`", delete_after=6)
+        await ctx.send(
+            "❌ Ungültige Eingabe.\n"
+            "Beispiele: `!clean` · `!clean 50` · `!clean 1234567890` · `!clean 1234567890 50`",
+            delete_after=8
+        )
 
 
 # ────────────────────────────────────────────────
