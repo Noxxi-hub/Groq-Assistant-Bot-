@@ -307,7 +307,7 @@ async def detect_language_llm(text: str) -> str:
 # ÜBERSETZEN — ALLE SPRACHEN IN EINEM CALL
 # ────────────────────────────────────────────────
 
-async def translate_all(text: str, target_langs: list, author_id: int = None) -> dict:
+async def translate_all(text: str, target_langs: list) -> dict:
     """
     Übersetzt text in ALLE Zielsprachen in einem einzigen API-Call.
     Spart bis zu 80% der API-Requests.
@@ -325,17 +325,6 @@ async def translate_all(text: str, target_langs: list, author_id: int = None) ->
     estimated = max(1500, min(6000, int(len(text) * 1.5 * len(target_langs))))
 
     try:
-        # Gender-Kontext für bessere Grammatik
-        gender_hint = ""
-        if author_id:
-            try:
-                from user_profiles import get_gender_context
-                ctx_hint = get_gender_context(author_id)
-                if ctx_hint:
-                    gender_hint = f"\nGENDER CONTEXT: {ctx_hint}"
-            except Exception:
-                pass
-
         result = await gemini_call(
             model=GEMINI_MODEL,
             temperature=0.1,
@@ -344,7 +333,7 @@ async def translate_all(text: str, target_langs: list, author_id: int = None) ->
                 {
                     "role": "system",
                     "content": (
-                        f"Du bist ein natürlicher, lockerer Übersetzer für einen Discord-Chat einer Gaming-Community.{gender_hint}\n"
+                        f"Du bist ein natürlicher, lockerer Übersetzer für einen Discord-Chat einer Gaming-Community.\n"
                         f"Übersetze den Text in diese {len(codes)} Sprachen: {codes_str}.\n\n"
                         f"WICHTIGSTE REGELN:\n"
                         f"1. Verwende IMMER die Du-Form — niemals 'Sie' (Deutsch) oder 'Vous' (Französisch), immer 'Tu'.\n"
@@ -691,18 +680,6 @@ async def cmd_help(ctx):
         ),
         inline=False
     )
-
-    embed.add_field(
-        name="👤 Mein Profil",
-        value=(
-            "`!ich` – Aktuelles Profil anzeigen\n"
-            "`!ich frau` – Als Frau speichern (bessere Grammatik bei Übersetzungen)\n"
-            "`!ich mann` – Als Mann speichern\n"
-            "`!ich neutral` – Als neutral speichern"
-        ),
-        inline=False
-    )
-
     embed.add_field(
         name="🗑️ Kanal leeren  🔐 Bot DEV",
         value=(
@@ -882,66 +859,6 @@ async def cmd_kanalid(ctx):
 # ────────────────────────────────────────────────
 # KANAL LEEREN
 # ────────────────────────────────────────────────
-
-# ────────────────────────────────────────────────
-# NUTZERPROFIL — Geschlecht für Übersetzungsgrammatik
-# ────────────────────────────────────────────────
-
-@bot.command(name="ich", aliases=["profil", "gender", "geschlecht"])
-async def cmd_ich(ctx, eingabe: str = None):
-    """Speichert dein Geschlecht für bessere Übersetzungsgrammatik."""
-    from user_profiles import GENDER_ALIASES, GENDER_LABELS, set_user_gender, get_user_gender
-
-    # Ohne Argument → aktuelles Profil anzeigen
-    if not eingabe:
-        gender = get_user_gender(ctx.author.id)
-        if gender:
-            label = GENDER_LABELS.get(gender, gender)
-            embed = discord.Embed(
-                title="👤 Dein Profil",
-                description=f"Geschlecht: **{label}**\n\nMit `!ich frau`, `!ich mann` oder `!ich neutral` ändern.",
-                color=0x5865F2
-            )
-        else:
-            embed = discord.Embed(
-                title="👤 Dein Profil",
-                description=(
-                    "Du hast noch kein Geschlecht gesetzt.\n\n"
-                    "Mit diesem Befehl kann der Bot grammatikalisch korrekt übersetzen:\n"
-                    "`!ich frau` · `!ich mann` · `!ich neutral`"
-                ),
-                color=0x9B59B6
-            )
-        await ctx.send(embed=embed, delete_after=20)
-        return
-
-    # Geschlecht aus Eingabe ermitteln
-    gender = GENDER_ALIASES.get(eingabe.lower().strip())
-    if not gender:
-        await ctx.send(
-            f"❌ Unbekannte Eingabe: `{eingabe}`\n"
-            "Verwende: `!ich frau` · `!ich mann` · `!ich neutral`",
-            delete_after=8
-        )
-        return
-
-    # Speichern
-    success = set_user_gender(ctx.author.id, ctx.author.display_name, gender)
-    if success:
-        label = GENDER_LABELS[gender]
-        embed = discord.Embed(
-            title="✅ Profil gespeichert",
-            description=(
-                f"**{label}**\n\n"
-                "Der Bot nutzt jetzt die passende Grammatik wenn er deine Nachrichten übersetzt.\n"
-                "*(Gilt auf allen Servern wo der Bot aktiv ist)*"
-            ),
-            color=0x2ECC71
-        )
-        await ctx.send(embed=embed, delete_after=15)
-    else:
-        await ctx.send("❌ Fehler beim Speichern. Bitte nochmal versuchen.", delete_after=8)
-
 
 NOXXI_ID = 1464651603654086748
 
@@ -1216,7 +1133,7 @@ async def on_message(message: discord.Message):
             return
 
         # Ein einziger API-Call für alle Sprachen → spart 80% der Requests
-        translations = await translate_all(content, target_langs, author_id=message.author.id)
+        translations = await translate_all(content, target_langs)
         for code, lang_name, label in target_langs:
             translation = translations.get(code, "")
             if translation:
