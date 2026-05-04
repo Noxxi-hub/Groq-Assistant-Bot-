@@ -298,9 +298,23 @@ async def detect_language_llm(text: str) -> str:
     if any(w in t for w in [' the ', ' and ', ' you ', ' is ', ' are ', ' i am ', ' not ']):
         return "EN"
 
-    # 4. Fallback: bei lateinischer Schrift ohne Treffer → EN statt OTHER
-    # (verhindert dass wir Nachrichten komplett skippen)
-    return "EN"
+    # 4. Fallback: Gemini API zur sicheren Spracherkennung nutzen
+    try:
+        result = await gemini_call(
+            model=GEMINI_MODEL,
+            temperature=0.0,
+            max_tokens=5,
+            messages=[
+                {"role": "system", "content": "Detect the language of the text. Reply with ONLY the 2-letter code: DE, FR, EN, PT, ES, RU, JA, ZH, KO, or OTHER. Nothing else."},
+                {"role": "user", "content": stripped[:200]}
+            ]
+        )
+        detected = result.strip().upper()[:2]
+        if detected in {"DE", "FR", "EN", "PT", "ES", "RU", "JA", "ZH", "KO"}:
+            return detected
+    except Exception:
+        pass
+    return "OTHER"
 
 
 # ────────────────────────────────────────────────
@@ -1094,18 +1108,20 @@ async def on_message(message: discord.Message):
         fields = []
 
         # ── Raum-spezifische Sprachen prüfen ──
-        # Raum hat eigene Einstellungen → diese nutzen (überschreibt globale)
-        # Raum hat KEINE Einstellungen → globale Sprachen nutzen (normales Verhalten)
-        # Raum wurde explizit deaktiviert (leere Liste) → gar nicht übersetzen
-        # ── Raum-spezifische Sprachen prüfen ──
-        room_langs = _get_room_langs_safe(message.channel.id, message.guild.id if message.guild else None)
-
-        if room_langs is not None:
-            if len(room_langs) == 0:
-                return  # Explizit deaktiviert
-            active_langs = room_langs
+        # HARDCODE: Raum 1495892175974830213 immer DE+FR+EN — kein MongoDB
+        HARDCODED_ROOMS = {
+            1495892175974830213: {"DE", "FR", "EN"},
+        }
+        if message.channel.id in HARDCODED_ROOMS:
+            active_langs = HARDCODED_ROOMS[message.channel.id]
         else:
-            active_langs = get_active_languages()  # Globale Einstellungen
+            room_langs = _get_room_langs_safe(message.channel.id, message.guild.id if message.guild else None)
+            if room_langs is not None:
+                if len(room_langs) == 0:
+                    return  # Explizit deaktiviert
+                active_langs = room_langs
+            else:
+                active_langs = get_active_languages()  # Globale Einstellungen
 
         # Haupt-Bot: feste Zielsprachen DE+FR+EN, Rest zuschaltbar
         ALL_LANGS = [
