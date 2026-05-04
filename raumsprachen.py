@@ -69,7 +69,22 @@ def get_room_langs(channel_id: int, guild_id: int = None) -> set | None:
         if guild_id:
             doc = col.find_one({"_id": _make_id(channel_id, guild_id)})
             if not doc:
-                doc = col.find_one({"_id": str(channel_id)})
+                # Altes Format gefunden → automatisch migrieren
+                old_doc = col.find_one({"_id": str(channel_id)})
+                if old_doc:
+                    log.info(f"Migriere alten Raumsprachen-Eintrag für {channel_id} → neues Format")
+                    col.update_one(
+                        {"_id": _make_id(channel_id, guild_id)},
+                        {"$set": {
+                            "active": old_doc.get("active", []),
+                            "disabled": old_doc.get("disabled", False),
+                            "guild_id": guild_id,
+                            "channel_id": channel_id,
+                        }},
+                        upsert=True
+                    )
+                    col.delete_one({"_id": str(channel_id)})
+                    doc = col.find_one({"_id": _make_id(channel_id, guild_id)})
         else:
             doc = col.find_one({"_id": str(channel_id)})
 
@@ -92,9 +107,18 @@ def set_room_langs(channel_id: int, langs: set, guild_id: int = None):
         col = get_col()
         col.update_one(
             {"_id": _make_id(channel_id, guild_id)},
-            {"$set": {"active": list(langs), "guild_id": guild_id, "channel_id": channel_id}},
+            {"$set": {
+                "active": list(langs),
+                "disabled": False,  # FIX: disabled-Flag immer zurücksetzen beim Aktivieren
+                "guild_id": guild_id,
+                "channel_id": channel_id,
+            }},
             upsert=True
         )
+        # FIX: Alten Eintrag ohne guild_id löschen → verhindert dass alter Eintrag
+        # nach Neustart geladen wird und die Einstellungen überschreibt
+        if guild_id:
+            col.delete_one({"_id": str(channel_id)})
     except Exception as e:
         log.error(f"Fehler beim Speichern der Raumsprachen: {e}")
 
@@ -119,6 +143,9 @@ def disable_room_langs(channel_id: int, guild_id: int = None):
             {"$set": {"active": [], "disabled": True, "guild_id": guild_id, "channel_id": channel_id}},
             upsert=True
         )
+        # FIX: Alten Eintrag ohne guild_id löschen
+        if guild_id:
+            col.delete_one({"_id": str(channel_id)})
     except Exception as e:
         log.error(f"Fehler beim Deaktivieren der Raumsprachen: {e}")
 
