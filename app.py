@@ -857,8 +857,14 @@ async def cmd_aipm(ctx, *, question: str = None):
         await ctx.send("Beispiel: `!aipm Qui est la VHA ?`  oder  `!aipm Was ist die VHA?`", delete_after=10)
         return
 
-    # Kurze öffentliche Bestätigung, die nach 5s verschwindet
-    confirm = await ctx.send(f"📬 {ctx.author.mention} Ich schicke dir die Antwort per DM!", delete_after=5)
+    # Originalnachricht des Users löschen
+    try:
+        await ctx.message.delete()
+    except discord.Forbidden:
+        pass
+
+    # Bestätigung anzeigen — wird am Ende ebenfalls gelöscht
+    confirm = await ctx.send(f"📬 {ctx.author.mention} Ich schicke dir die Antwort per DM!")
 
     lang = await detect_language_llm(question)
     flag = LANG_FLAGS.get(lang, "🌐")
@@ -894,8 +900,17 @@ async def cmd_aipm(ctx, *, question: str = None):
 
     try:
         await ctx.author.send(embed=embed)
+        # DM erfolgreich → Bestätigung auch löschen
+        try:
+            await confirm.delete()
+        except discord.NotFound:
+            pass
     except discord.Forbidden:
-        # User hat DMs deaktiviert
+        # User hat DMs deaktiviert → Bestätigung löschen, Fehlermeldung zeigen
+        try:
+            await confirm.delete()
+        except discord.NotFound:
+            pass
         await ctx.send(
             f"❌ {ctx.author.mention} Ich konnte dir keine DM schicken. "
             "Bitte aktiviere DMs von Servermitgliedern in deinen Discord-Einstellungen.",
