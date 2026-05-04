@@ -184,10 +184,11 @@ async def gemini_call(model: str, messages: list, temperature: float = 0.1,
 
 
 async def gemini_call_thinking(model: str, messages: list, temperature: float = 0.7,
-                               max_tokens: int = 1000) -> str:
+                               max_tokens: int = 1000, retries: int = 3) -> str:
     """
     Gemini-Call MIT aktiviertem Thinking — nur für !ai verwendet.
     Für Übersetzungen → gemini_call() mit thinking_budget=0 verwenden.
+    Enthält Fallback-Kette und Retry bei 503/429/Überlastung.
     """
     loop = asyncio.get_event_loop()
 
@@ -202,22 +203,50 @@ async def gemini_call_thinking(model: str, messages: list, temperature: float = 
             if isinstance(content, str):
                 contents.append(types.Content(role="user", parts=[types.Part(text=content)]))
 
-    config = types.GenerateContentConfig(
-        temperature=temperature,
-        max_output_tokens=max_tokens,
-        system_instruction=system_text,
-        # Thinking aktiv (kein thinking_budget gesetzt) — gut für komplexe Fragen
-    )
-
-    resp = await loop.run_in_executor(
-        None,
-        lambda: gemini_client.models.generate_content(
-            model=model,
-            contents=contents,
-            config=config,
+    last_error = None
+    for model_name in GEMINI_MODELS:
+        # Thinking nur bei 2.5-Modellen aktivieren (3.x hat es eingebaut)
+        use_thinking = "2.5" in model_name
+        config = types.GenerateContentConfig(
+            temperature=temperature,
+            max_output_tokens=max_tokens,
+            system_instruction=system_text,
+            thinking_config=types.ThinkingConfig(thinking_budget=512) if use_thinking else None,
         )
-    )
-    return resp.text.strip()
+
+        wait = 4
+        for attempt in range(retries):
+            async with gemini_semaphore:
+                try:
+                    resp = await loop.run_in_executor(
+                        None,
+                        lambda m=model_name, c=contents, cfg=config: gemini_client.models.generate_content(
+                            model=m,
+                            contents=c,
+                            config=cfg,
+                        )
+                    )
+                    if model_name != GEMINI_MODELS[0]:
+                        log.info(f"!ai FALLBACK OK → {model_name}")
+                    return resp.text.strip()
+
+                except Exception as e:
+                    err = str(e)
+                    last_error = err
+                    if "429" in err or "quota" in err.lower() or "rate" in err.lower():
+                        log.warning(f"!ai {model_name} Rate-Limit (Versuch {attempt+1}/{retries}) – warte {wait}s")
+                        await asyncio.sleep(wait)
+                        wait = min(wait * 2, 60)
+                    elif "503" in err or "500" in err or "502" in err or "unavailable" in err.lower() or "server" in err.lower():
+                        log.warning(f"!ai {model_name} überlastet ({err[:60]}), versuche nächstes Modell...")
+                        break  # sofort nächstes Modell
+                    else:
+                        log.error(f"!ai Gemini-Fehler {model_name}: {e}")
+                        break
+
+        log.warning(f"!ai Modell {model_name} fehlgeschlagen, fallback...")
+
+    raise Exception(f"Alle Gemini-Modelle down. Letzter Fehler: {last_error}")
 
 
 # ────────────────────────────────────────────────
