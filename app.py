@@ -1,7 +1,6 @@
 import discord
 from discord.ext import commands
 import os
-from pymongo import MongoClient
 import re
 import time
 import asyncio
@@ -351,11 +350,10 @@ async def detect_language_llm(text: str) -> str:
 # ÜBERSETZEN — ALLE SPRACHEN IN EINEM CALL
 # ────────────────────────────────────────────────
 
-async def translate_all(text: str, target_langs: list) -> dict:
+async def translate_all(text: str, target_langs: list, context: str = "") -> dict:
     """
     Übersetzt text in ALLE Zielsprachen in einem einzigen API-Call.
-    Spart bis zu 80% der API-Requests.
-    target_langs: list of (code, lang_name, label) tuples
+    context: Die letzten paar Nachrichten aus dem Kanal als Gesprächskontext.
     Gibt dict zurück: {code: übersetzter_text}
     """
     if not target_langs:
@@ -377,19 +375,21 @@ async def translate_all(text: str, target_langs: list) -> dict:
                 {
                     "role": "system",
                     "content": (
-                        f"Du bist ein natürlicher, lockerer Übersetzer für einen Discord-Chat einer Gaming-Community.\n"
+                        f"Du bist ein intelligenter Übersetzer für eine internationale Gaming-Community (Discord).\n"
                         f"Übersetze den Text in diese {len(codes)} Sprachen: {codes_str}.\n\n"
-                        f"WICHTIGSTE REGELN:\n"
-                        f"1. Verwende IMMER die Du-Form — niemals 'Sie' (Deutsch) oder 'Vous' (Französisch), immer 'Tu'.\n"
-                        f"2. Übersetze den SINN, nicht nur Wörter — es soll natürlich und wie ein echter Mensch klingen.\n"
-                        f"3. Behalte den Ton bei: Wenn ein Satz witzig, frech oder emotional ist, übersetze ihn genauso.\n"
-                        f"4. Kosenamen korrekt: 'süße/süßer'→ma chérie/mon chéri (FR), sweetie/honey (EN); 'schatz'→chéri/chérie (FR), honey/darling (EN)\n"
-                        f"4b. Nur diese Kosenamen NIEMALS übersetzen: baby, babe, bby — diese bleiben in allen Sprachen unverändert\n"
-                        f"5. Diese Wörter NIE übersetzen: Spielernamen, @mentions, R1/R2/R3/R4/R5, Koordinaten, Allianz-Namen\n"
-                        f"6. Emojis bleiben exakt unverändert\n"
-                        f"7. Jedes Sprachfeld MUSS in der richtigen Sprache sein — DE=Deutsch, FR=Französisch, EN=Englisch, PT=Portugiesisch\n"
-                        f"8. WICHTIG: Alle {len(codes)} Sprachfelder MÜSSEN immer befüllt sein — auch bei sehr kurzen Sätzen oder einzelnen Wörtern\n"
-                        f"9. Antworte NUR mit diesem JSON, kein Markdown, kein Extra-Text:\n"
+                        + (f"GESPRÄCHSKONTEXT (letzte Nachrichten im Kanal — NUR zum Verstehen, NICHT übersetzen):\n{context}\n\n" if context else "")
+                        + f"DEINE MISSION:\n"
+                        f"1. ANALYSE: Erkenne den Tonfall — ist es ein privates/liebevolles Gespräch oder geht es um Spiel/Allianz-Organisation? Übersetze entsprechend.\n"
+                        f"2. NATÜRLICHKEIT: Übersetze den SINN. Klinge wie ein Muttersprachler im Chat, nicht wie ein Lexikon.\n"
+                        f"3. TON: Wenn ein Satz witzig, frech, emotional oder liebevoll ist, übersetze ihn genauso — nicht steif.\n"
+                        f"4. DU-FORM: Verwende IMMER 'Du' (Deutsch), 'Tu/Toi' (Französisch) — niemals 'Sie' oder 'Vous'.\n"
+                        f"5. KOSENAMEN: 'schatz'→chéri/chérie (FR), honey/darling (EN); 'süße/süßer'→ma chérie/mon chéri (FR), sweetie (EN).\n"
+                        f"5b. Diese Kosenamen NIE übersetzen: baby, babe, bby — bleiben in allen Sprachen gleich.\n"
+                        f"6. NO-GO: Spielernamen, @mentions, R1/R2/R3/R4/R5, Koordinaten, Allianz-Namen NIEMALS übersetzen.\n"
+                        f"7. Emojis bleiben exakt unverändert.\n"
+                        f"8. Jedes Sprachfeld MUSS in der richtigen Zielsprache sein — DE=Deutsch, FR=Französisch, EN=Englisch, PT=Portugiesisch.\n"
+                        f"9. WICHTIG: Alle {len(codes)} Sprachfelder MÜSSEN befüllt sein — auch bei sehr kurzen Sätzen.\n"
+                        f"10. Antworte NUR mit diesem JSON, kein Markdown, kein Extra-Text:\n"
                         f"{{{json_keys}}}"
                     )
                 },
@@ -807,67 +807,6 @@ async def translate_error(ctx, error):
         await ctx.send("❌ Du hast keine Berechtigung dafür. / Tu n'as pas la permission.")
 
 
-# ────────────────────────────────────────────────
-# KI-Gedächtnis — MongoDB
-# ────────────────────────────────────────────────
-
-_ai_memory_client = None
-
-def get_ai_memory_col():
-    global _ai_memory_client
-    if _ai_memory_client is None:
-        _ai_memory_client = MongoClient(os.getenv("MONGODB_URI"))
-    return _ai_memory_client["vhabot"]["ai_memory"]
-
-
-def load_history(user_id: int) -> list:
-    """Lädt die letzten 8 Nachrichten eines Users aus MongoDB."""
-    try:
-        col = get_ai_memory_col()
-        doc = col.find_one({"_id": str(user_id)})
-        if doc:
-            return doc.get("history", [])
-    except Exception:
-        pass
-    return []
-
-
-def save_history(user_id: int, history: list):
-    """Speichert den Verlauf in MongoDB — max. 8 Einträge."""
-    try:
-        col = get_ai_memory_col()
-        # Nur die letzten 8 behalten
-        history = history[-8:]
-        col.update_one(
-            {"_id": str(user_id)},
-            {"$set": {"history": history}},
-            upsert=True
-        )
-    except Exception as e:
-        log.error(f"AI Memory Fehler: {e}")
-
-
-def clear_history(user_id: int):
-    """Löscht den Verlauf eines Users."""
-    try:
-        col = get_ai_memory_col()
-        col.delete_one({"_id": str(user_id)})
-    except Exception:
-        pass
-
-
-def build_messages(system: str, history: list, question: str) -> list:
-    """Baut die Nachrichtenliste mit Verlauf auf."""
-    messages = [{"role": "system", "content": system}]
-    # Verlauf anhängen
-    for entry in history:
-        messages.append({"role": "user", "content": entry["question"]})
-        messages.append({"role": "assistant", "content": entry["answer"]})
-    # Aktuelle Frage
-    messages.append({"role": "user", "content": question})
-    return messages
-
-
 @bot.command(name="ai")
 @commands.cooldown(1, 12, commands.BucketType.user)
 async def cmd_ai(ctx, *, question: str = None):
@@ -881,40 +820,33 @@ async def cmd_ai(ctx, *, question: str = None):
     flag = LANG_FLAGS.get(lang, "🌐")
     footer = f"Antwort in {lang}"
 
-    # Verlauf laden
-    history = load_history(ctx.author.id)
-    system_prompt = (
-        "Du bist ein freundlicher VHA-Alliance Assistent. "
-        "Antworte IMMER in derselben Sprache wie die Frage. "
-        "Natürlich und direkt. "
-        "Du erinnerst dich an frühere Fragen des Users in diesem Gespräch."
-    )
-    messages = build_messages(system_prompt, history, question.strip())
-
     try:
         answer = await gemini_call_thinking(
             model=GEMINI_MODEL,
             temperature=0.7,
             max_tokens=1000,
-            messages=messages
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "Du bist ein freundlicher VHA-Alliance Assistent. "
+                        "Antworte IMMER in derselben Sprache wie die Frage. "
+                        "Natürlich und direkt."
+                    )
+                },
+                {"role": "user", "content": question.strip()}
+            ]
         )
         color = 0x5865F2
-        # Verlauf speichern
-        history.append({"question": question.strip(), "answer": answer})
-        save_history(ctx.author.id, history)
     except Exception as e:
         answer = f"Fehler: {str(e)}"
         color = 0xFF0000
         footer = "Fehler"
 
-    has_history = len(history) > 1
     embed = discord.Embed(title=f"VHA KI • Antwort {flag}", description=answer, color=color)
     embed.set_author(name="VHA ALLIANCE", icon_url=LOGO_URL)
     embed.add_field(name="→ Deine Frage", value=question[:900], inline=False)
-    embed.set_footer(
-        text=f"VHA • Gemini • {GEMINI_MODEL} • {footer}" + (" • 🧠 Gedächtnis aktiv" if has_history else ""),
-        icon_url=LOGO_URL
-    )
+    embed.set_footer(text=f"VHA • Gemini • {GEMINI_MODEL} • {footer}", icon_url=LOGO_URL)
     await thinking.edit(embed=embed)
 
 
@@ -939,40 +871,33 @@ async def cmd_aipm(ctx, *, question: str = None):
     flag = LANG_FLAGS.get(lang, "🌐")
     footer = f"Antwort in {lang}"
 
-    # Verlauf laden (gleicher Verlauf wie !ai — pro User)
-    history = load_history(ctx.author.id)
-    system_prompt = (
-        "Du bist ein freundlicher VHA-Alliance Assistent. "
-        "Antworte IMMER in derselben Sprache wie die Frage. "
-        "Natürlich und direkt. "
-        "Du erinnerst dich an frühere Fragen des Users in diesem Gespräch."
-    )
-    messages = build_messages(system_prompt, history, question.strip())
-
     try:
         answer = await gemini_call_thinking(
             model=GEMINI_MODEL,
             temperature=0.7,
             max_tokens=1000,
-            messages=messages
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "Du bist ein freundlicher VHA-Alliance Assistent. "
+                        "Antworte IMMER in derselben Sprache wie die Frage. "
+                        "Natürlich und direkt."
+                    )
+                },
+                {"role": "user", "content": question.strip()}
+            ]
         )
         color = 0x5865F2
-        # Verlauf speichern
-        history.append({"question": question.strip(), "answer": answer})
-        save_history(ctx.author.id, history)
     except Exception as e:
         answer = f"Fehler: {str(e)}"
         color = 0xFF0000
         footer = "Fehler"
 
-    has_history = len(history) > 1
     embed = discord.Embed(title=f"VHA KI • Antwort {flag}", description=answer, color=color)
     embed.set_author(name="VHA ALLIANCE", icon_url=LOGO_URL)
     embed.add_field(name="→ Deine Frage", value=question[:900], inline=False)
-    embed.set_footer(
-        text=f"VHA • Gemini • {GEMINI_MODEL} • {footer} • Privat" + (" • 🧠 Gedächtnis aktiv" if has_history else ""),
-        icon_url=LOGO_URL
-    )
+    embed.set_footer(text=f"VHA • Gemini • {GEMINI_MODEL} • {footer} • Privat", icon_url=LOGO_URL)
 
     try:
         await ctx.author.send(embed=embed)
@@ -992,23 +917,6 @@ async def cmd_aipm(ctx, *, question: str = None):
             "Bitte aktiviere DMs von Servermitgliedern in deinen Discord-Einstellungen.",
             delete_after=15
         )
-
-
-@bot.command(name="aiclean", aliases=["aireset", "aiclear", "ai_reset"])
-async def cmd_aiclean(ctx):
-    """Löscht das KI-Gedächtnis des Users."""
-    clear_history(ctx.author.id)
-    embed = discord.Embed(
-        title="🧹 KI-Gedächtnis gelöscht",
-        description=(
-            "🇩🇪 Dein Gesprächsverlauf wurde gelöscht. Die KI startet frisch!\n"
-            "🇫🇷 Ton historique a été effacé. L'IA repart à zéro!\n"
-            "🇬🇧 Your conversation history has been cleared. Fresh start!"
-        ),
-        color=0x2ECC71
-    )
-    embed.set_footer(text="VHA • KI-Gedächtnis", icon_url=LOGO_URL)
-    await ctx.send(embed=embed, delete_after=10)
 
 
 @cmd_aipm.error
@@ -1350,8 +1258,25 @@ async def on_message(message: discord.Message):
         if not target_langs:
             return
 
+        # Kontext: letzte 4 Nachrichten aus dem Kanal laden
+        context_lines = []
+        try:
+            async for ctx_msg in message.channel.history(limit=5):
+                if ctx_msg.id == message.id:
+                    continue
+                if ctx_msg.author.bot:
+                    continue
+                if ctx_msg.content and len(ctx_msg.content.strip()) > 1:
+                    context_lines.append(f"{ctx_msg.author.display_name}: {ctx_msg.content.strip()[:150]}")
+                if len(context_lines) >= 4:
+                    break
+            context_lines.reverse()  # Älteste zuerst
+        except Exception:
+            pass
+        context_str = "\n".join(context_lines)
+
         # Ein einziger API-Call für alle Sprachen → spart 80% der Requests
-        translations = await translate_all(content, target_langs)
+        translations = await translate_all(content, target_langs, context=context_str)
         for code, lang_name, label in target_langs:
             translation = translations.get(code, "")
             if translation:
