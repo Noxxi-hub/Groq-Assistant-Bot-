@@ -888,7 +888,10 @@ async def cmd_ai(ctx, *, question: str = None):
     footer = f"Antwort in {lang}"
 
     history = load_history(ctx.author.id)
-    system_prompt = (
+
+    # Spezial-Modus: liebevoll-frecher Assistent für bestimmten User
+    is_special = _special_ai_mode and ctx.author.id == SPECIAL_USER_ID
+    system_prompt = SPECIAL_SYSTEM_PROMPT if is_special else (
         "Du bist ein freundlicher VHA-Alliance Assistent. "
         "Antworte IMMER in derselben Sprache wie die Frage. "
         "Natürlich und direkt. "
@@ -899,11 +902,11 @@ async def cmd_ai(ctx, *, question: str = None):
     try:
         answer = await gemini_call_thinking(
             model=GEMINI_MODEL,
-            temperature=0.7,
+            temperature=0.85 if is_special else 0.7,
             max_tokens=1000,
             messages=messages
         )
-        color = 0x5865F2
+        color = 0xFF69B4 if is_special else 0x5865F2
         history.append({"question": question.strip(), "answer": answer})
         save_history(ctx.author.id, history)
     except Exception as e:
@@ -911,12 +914,14 @@ async def cmd_ai(ctx, *, question: str = None):
         color = 0xFF0000
         footer = "Fehler"
 
-    embed = discord.Embed(title=f"VHA KI • Antwort {flag}", description=answer, color=color)
+    title = f"💝 VHA KI • Antwort {flag}" if is_special else f"VHA KI • Antwort {flag}"
+    embed = discord.Embed(title=title, description=answer, color=color)
     embed.set_author(name="VHA ALLIANCE", icon_url=LOGO_URL)
     embed.add_field(name="→ Deine Frage", value=question[:900], inline=False)
     has_history = len(history) > 1
+    special_tag = " • 💝 Spezial-Modus" if is_special else ""
     embed.set_footer(
-        text=f"VHA • Gemini • {GEMINI_MODEL} • {footer}" + (" • 🧠 Gedächtnis aktiv" if has_history else ""),
+        text=f"VHA • Gemini • {GEMINI_MODEL} • {footer}" + (" • 🧠 Gedächtnis aktiv" if has_history else "") + special_tag,
         icon_url=LOGO_URL
     )
     await thinking.edit(embed=embed)
@@ -942,7 +947,10 @@ async def cmd_aipm(ctx, *, question: str = None):
     footer = f"Antwort in {lang}"
 
     history = load_history(ctx.author.id)
-    system_prompt = (
+
+    # Spezial-Modus: liebevoll-frecher Assistent für bestimmten User
+    is_special = _special_ai_mode and ctx.author.id == SPECIAL_USER_ID
+    system_prompt = SPECIAL_SYSTEM_PROMPT if is_special else (
         "Du bist ein freundlicher VHA-Alliance Assistent. "
         "Antworte IMMER in derselben Sprache wie die Frage. "
         "Natürlich und direkt. "
@@ -953,11 +961,11 @@ async def cmd_aipm(ctx, *, question: str = None):
     try:
         answer = await gemini_call_thinking(
             model=GEMINI_MODEL,
-            temperature=0.7,
+            temperature=0.85 if is_special else 0.7,
             max_tokens=1000,
             messages=messages
         )
-        color = 0x5865F2
+        color = 0xFF69B4 if is_special else 0x5865F2
         history.append({"question": question.strip(), "answer": answer})
         save_history(ctx.author.id, history)
     except Exception as e:
@@ -966,11 +974,13 @@ async def cmd_aipm(ctx, *, question: str = None):
         footer = "Fehler"
 
     has_history = len(history) > 1
-    embed = discord.Embed(title=f"VHA KI • Antwort {flag}", description=answer, color=color)
+    special_tag = " • 💝 Spezial-Modus" if is_special else ""
+    title = f"💝 VHA KI • Antwort {flag}" if is_special else f"VHA KI • Antwort {flag}"
+    embed = discord.Embed(title=title, description=answer, color=color)
     embed.set_author(name="VHA ALLIANCE", icon_url=LOGO_URL)
     embed.add_field(name="→ Deine Frage", value=question[:900], inline=False)
     embed.set_footer(
-        text=f"VHA • Gemini • {GEMINI_MODEL} • {footer} • Privat" + (" • 🧠 Gedächtnis aktiv" if has_history else ""),
+        text=f"VHA • Gemini • {GEMINI_MODEL} • {footer} • Privat" + (" • 🧠 Gedächtnis aktiv" if has_history else "") + special_tag,
         icon_url=LOGO_URL
     )
 
@@ -1057,6 +1067,68 @@ async def cmd_kanalid(ctx):
 # ────────────────────────────────────────────────
 
 NOXXI_ID = 1464651603654086748
+
+# ────────────────────────────────────────────────
+# SPEZIAL-MODUS: Liebevoller Assistent für bestimmten User
+# ────────────────────────────────────────────────
+
+SPECIAL_USER_ID = 238610295893917697  # User der den speziellen Modus bekommt
+_special_ai_mode: bool = False  # An/Aus - nur Noxxi kann umschalten
+
+SPECIAL_SYSTEM_PROMPT = (
+    "Du bist ein freundlicher, aber frecher VHA-Alliance Assistent. "
+    "Du antwortest liebevoll — aber mit einem Augenzwinkern. "
+    "Wenn der User einen Fehler macht, korrigierst du ihn sanft, aber mit einem witzigen Spruch dazu. "
+    "Wenn er dich herausfordert oder provoziert, bist du schlagfertig und gibst ihm eine witzige, aber nette Antwort zurück. "
+    "Du bist nicht arrogant — du bist charmant frech. Denk an einen frechen besten Freund der es gut meint. "
+    "Antworte IMMER in derselben Sprache wie die Frage. "
+    "Du erinnerst dich an frühere Fragen des Users in diesem Gespräch."
+)
+
+
+@bot.command(name="specialmode", aliases=["smode", "liebesmode", "spezial"])
+async def cmd_specialmode(ctx, action: str = None):
+    """Schaltet den liebevoll-frechen Modus für den Spezial-User an/aus. Nur Noxxi."""
+    global _special_ai_mode
+
+    if ctx.author.id != NOXXI_ID:
+        await ctx.send("❌ Nur Noxxi kann diesen Befehl nutzen.", delete_after=5)
+        return
+
+    if action is None:
+        status = "✅ AN" if _special_ai_mode else "❌ AUS"
+        await ctx.send(
+            f"💝 Spezial-KI-Modus ist gerade: **{status}**\n"
+            f"`!specialmode on` / `!specialmode off`",
+            delete_after=10
+        )
+        return
+
+    action = action.lower()
+    if action == "on":
+        _special_ai_mode = True
+        embed = discord.Embed(
+            title="💝 Spezial-KI-Modus aktiviert",
+            description=(
+                "Der liebevoll-freche Modus ist jetzt **AN**.\n"
+                f"Gilt für User `{SPECIAL_USER_ID}`.\n"
+                "🎭 *Liebevoll • Frech • Schlagfertig*"
+            ),
+            color=0xFF69B4
+        )
+        embed.set_footer(text="VHA • Spezial-Modus", icon_url=LOGO_URL)
+        await ctx.send(embed=embed)
+    elif action == "off":
+        _special_ai_mode = False
+        embed = discord.Embed(
+            title="💝 Spezial-KI-Modus deaktiviert",
+            description="Der liebevoll-freche Modus ist jetzt **AUS**.",
+            color=0x808080
+        )
+        embed.set_footer(text="VHA • Spezial-Modus", icon_url=LOGO_URL)
+        await ctx.send(embed=embed)
+    else:
+        await ctx.send("`!specialmode on` / `!specialmode off`", delete_after=8)
 
 @bot.command(name="clean", aliases=["clear", "purge", "löschen"])
 async def cmd_clean(ctx, *args):
