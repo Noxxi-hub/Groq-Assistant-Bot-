@@ -807,6 +807,73 @@ async def translate_error(ctx, error):
         await ctx.send("❌ Du hast keine Berechtigung dafür. / Tu n'as pas la permission.")
 
 
+# ────────────────────────────────────────────────
+# KI-Gedächtnis — MongoDB
+# ────────────────────────────────────────────────
+
+_ai_memory_client = None
+
+def get_ai_memory_col():
+    global _ai_memory_client
+    if _ai_memory_client is None:
+        _ai_memory_client = MongoClient(os.getenv("MONGODB_URI"))
+    return _ai_memory_client["vhabot"]["ai_memory"]
+
+def load_history(user_id: int) -> list:
+    try:
+        col = get_ai_memory_col()
+        doc = col.find_one({"_id": str(user_id)})
+        if doc:
+            return doc.get("history", [])
+    except Exception:
+        pass
+    return []
+
+def save_history(user_id: int, history: list):
+    try:
+        col = get_ai_memory_col()
+        history = history[-8:]
+        col.update_one(
+            {"_id": str(user_id)},
+            {"$set": {"history": history}},
+            upsert=True
+        )
+    except Exception as e:
+        log.error(f"AI Memory Fehler: {e}")
+
+def clear_history(user_id: int):
+    try:
+        col = get_ai_memory_col()
+        col.delete_one({"_id": str(user_id)})
+    except Exception:
+        pass
+
+def build_messages(system: str, history: list, question: str) -> list:
+    messages = [{"role": "system", "content": system}]
+    for entry in history:
+        messages.append({"role": "user", "content": entry["question"]})
+        messages.append({"role": "assistant", "content": entry["answer"]})
+    messages.append({"role": "user", "content": question})
+    return messages
+
+
+@bot.command(name="aiclean", aliases=["aireset", "aiclear", "ai_reset"])
+async def cmd_aiclean(ctx):
+    """Löscht das KI-Gedächtnis des Users."""
+    clear_history(ctx.author.id)
+    embed = discord.Embed(
+        title="🧹 KI-Gedächtnis gelöscht",
+        description=(
+            "🇩🇪 Dein Gesprächsverlauf wurde gelöscht. Die KI startet frisch!\n"
+            "🇫🇷 Ton historique a été effacé. L'IA repart à zéro!\n"
+            "🇬🇧 Your conversation history has been cleared. Fresh start!"
+        ),
+        color=0x2ECC71
+    )
+    embed.set_footer(text="VHA • KI-Gedächtnis", icon_url=LOGO_URL)
+    await ctx.send(embed=embed, delete_after=10)
+
+
 @bot.command(name="ai")
 @commands.cooldown(1, 12, commands.BucketType.user)
 async def cmd_ai(ctx, *, question: str = None):
@@ -820,24 +887,25 @@ async def cmd_ai(ctx, *, question: str = None):
     flag = LANG_FLAGS.get(lang, "🌐")
     footer = f"Antwort in {lang}"
 
+    history = load_history(ctx.author.id)
+    system_prompt = (
+        "Du bist ein freundlicher VHA-Alliance Assistent. "
+        "Antworte IMMER in derselben Sprache wie die Frage. "
+        "Natürlich und direkt. "
+        "Du erinnerst dich an frühere Fragen des Users in diesem Gespräch."
+    )
+    messages = build_messages(system_prompt, history, question.strip())
+
     try:
         answer = await gemini_call_thinking(
             model=GEMINI_MODEL,
             temperature=0.7,
             max_tokens=1000,
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "Du bist ein freundlicher VHA-Alliance Assistent. "
-                        "Antworte IMMER in derselben Sprache wie die Frage. "
-                        "Natürlich und direkt."
-                    )
-                },
-                {"role": "user", "content": question.strip()}
-            ]
+            messages=messages
         )
         color = 0x5865F2
+        history.append({"question": question.strip(), "answer": answer})
+        save_history(ctx.author.id, history)
     except Exception as e:
         answer = f"Fehler: {str(e)}"
         color = 0xFF0000
@@ -846,7 +914,11 @@ async def cmd_ai(ctx, *, question: str = None):
     embed = discord.Embed(title=f"VHA KI • Antwort {flag}", description=answer, color=color)
     embed.set_author(name="VHA ALLIANCE", icon_url=LOGO_URL)
     embed.add_field(name="→ Deine Frage", value=question[:900], inline=False)
-    embed.set_footer(text=f"VHA • Gemini • {GEMINI_MODEL} • {footer}", icon_url=LOGO_URL)
+    has_history = len(history) > 1
+    embed.set_footer(
+        text=f"VHA • Gemini • {GEMINI_MODEL} • {footer}" + (" • 🧠 Gedächtnis aktiv" if has_history else ""),
+        icon_url=LOGO_URL
+    )
     await thinking.edit(embed=embed)
 
 
@@ -858,50 +930,52 @@ async def cmd_aipm(ctx, *, question: str = None):
         await ctx.send("Beispiel: `!aipm Qui est la VHA ?`  oder  `!aipm Was ist die VHA?`", delete_after=10)
         return
 
-    # Originalnachricht des Users löschen
     try:
         await ctx.message.delete()
     except discord.Forbidden:
         pass
 
-    # Bestätigung anzeigen — wird am Ende ebenfalls gelöscht
     confirm = await ctx.send(f"📬 {ctx.author.mention} Ich schicke dir die Antwort per DM!")
 
     lang = await detect_language_llm(question)
     flag = LANG_FLAGS.get(lang, "🌐")
     footer = f"Antwort in {lang}"
 
+    history = load_history(ctx.author.id)
+    system_prompt = (
+        "Du bist ein freundlicher VHA-Alliance Assistent. "
+        "Antworte IMMER in derselben Sprache wie die Frage. "
+        "Natürlich und direkt. "
+        "Du erinnerst dich an frühere Fragen des Users in diesem Gespräch."
+    )
+    messages = build_messages(system_prompt, history, question.strip())
+
     try:
         answer = await gemini_call_thinking(
             model=GEMINI_MODEL,
             temperature=0.7,
             max_tokens=1000,
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "Du bist ein freundlicher VHA-Alliance Assistent. "
-                        "Antworte IMMER in derselben Sprache wie die Frage. "
-                        "Natürlich und direkt."
-                    )
-                },
-                {"role": "user", "content": question.strip()}
-            ]
+            messages=messages
         )
         color = 0x5865F2
+        history.append({"question": question.strip(), "answer": answer})
+        save_history(ctx.author.id, history)
     except Exception as e:
         answer = f"Fehler: {str(e)}"
         color = 0xFF0000
         footer = "Fehler"
 
+    has_history = len(history) > 1
     embed = discord.Embed(title=f"VHA KI • Antwort {flag}", description=answer, color=color)
     embed.set_author(name="VHA ALLIANCE", icon_url=LOGO_URL)
     embed.add_field(name="→ Deine Frage", value=question[:900], inline=False)
-    embed.set_footer(text=f"VHA • Gemini • {GEMINI_MODEL} • {footer} • Privat", icon_url=LOGO_URL)
+    embed.set_footer(
+        text=f"VHA • Gemini • {GEMINI_MODEL} • {footer} • Privat" + (" • 🧠 Gedächtnis aktiv" if has_history else ""),
+        icon_url=LOGO_URL
+    )
 
     try:
         await ctx.author.send(embed=embed)
-        # DM erfolgreich → Bestätigung auch löschen
         try:
             await confirm.delete()
         except discord.NotFound:
