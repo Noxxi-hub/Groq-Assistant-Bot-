@@ -62,31 +62,45 @@ def get_room_langs(channel_id: int, guild_id: int = None) -> set | None:
     - None  → kein Eintrag ODER leere Liste → globale Einstellungen verwenden
     - set() → explizit disabled=True → Übersetzung deaktiviert
     - set mit Codes → nur diese Sprachen übersetzen
+
+    Sucht immer in BEIDEN Formaten (neu: guild_id_channel_id, alt: channel_id)
+    damit keine Einträge verloren gehen.
     """
     try:
         col = get_col()
         doc = None
+
+        # 1. Neues Format suchen (guild_id_channel_id)
         if guild_id:
             doc = col.find_one({"_id": _make_id(channel_id, guild_id)})
-            if not doc:
-                # Altes Format gefunden → automatisch migrieren
-                old_doc = col.find_one({"_id": str(channel_id)})
-                if old_doc:
-                    log.info(f"Migriere alten Raumsprachen-Eintrag für {channel_id} → neues Format")
-                    col.update_one(
-                        {"_id": _make_id(channel_id, guild_id)},
-                        {"$set": {
-                            "active": old_doc.get("active", []),
-                            "disabled": old_doc.get("disabled", False),
-                            "guild_id": guild_id,
-                            "channel_id": channel_id,
-                        }},
-                        upsert=True
-                    )
-                    col.delete_one({"_id": str(channel_id)})
-                    doc = col.find_one({"_id": _make_id(channel_id, guild_id)})
-        else:
+
+        # 2. Altes Format als Fallback (nur channel_id als String)
+        if not doc:
             doc = col.find_one({"_id": str(channel_id)})
+            # Wenn altes Format gefunden → automatisch ins neue Format migrieren
+            if doc and guild_id:
+                log.info(f"Migriere Raumsprachen-Eintrag {channel_id} → {guild_id}_{channel_id}")
+                new_doc = {
+                    "active": doc.get("active", []),
+                    "disabled": doc.get("disabled", False),
+                    "guild_id": guild_id,
+                    "channel_id": channel_id,
+                }
+                col.update_one(
+                    {"_id": _make_id(channel_id, guild_id)},
+                    {"$set": new_doc},
+                    upsert=True
+                )
+                # Alten Eintrag erst löschen NACHDEM neuer sicher gespeichert ist
+                verify = col.find_one({"_id": _make_id(channel_id, guild_id)})
+                if verify:
+                    col.delete_one({"_id": str(channel_id)})
+                    doc = verify  # neuen Eintrag verwenden
+                # Falls Migration fehlschlug: alten doc behalten → kein Datenverlust
+
+        # 3. Auch per channel_id-Feld suchen (für Einträge die guild_id haben aber falsche _id)
+        if not doc and guild_id:
+            doc = col.find_one({"channel_id": channel_id, "guild_id": guild_id})
 
         if not doc:
             return None
